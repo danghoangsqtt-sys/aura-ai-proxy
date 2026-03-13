@@ -242,3 +242,29 @@ export interface DictionaryResponse {
   structure?: string;
   usageNotes?: string;
 }
+
+/**
+ * Tạo Truyện Chêm (Macaronic Story) song ngữ Việt-Anh
+ */
+export const generateMacaronicStory = async (wordList: string, topic: string): Promise<string> => {
+  const apiKey = await getApiKey();
+  if (!apiKey) throw new Error("Chưa cấu hình API Key trong phần Cài đặt.");
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  const prompt = `Đóng vai một chuyên gia ngôn ngữ học. Hãy viết một câu chuyện ngắn bằng tiếng Việt (khoảng 250 - 300 chữ) với chủ đề: ${topic}. 
+YÊU CẦU BẮT BUỘC: Hãy thay thế các từ tiếng Việt tương ứng bằng các từ tiếng Anh sau đây: ${wordList}. 
+Đảm bảo ngữ cảnh của câu chuyện đủ rõ ràng, tự nhiên để người đọc có thể dễ dàng đoán được nghĩa của các từ tiếng Anh được chêm vào. Trả về kết quả dưới dạng Markdown, in đậm (**word**) các từ tiếng Anh đó.`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: prompt,
+      config: { temperature: 0.9 }
+    });
+    return response.text || '';
+  } catch (error: any) {
+    console.error("Macaronic Story Error:", error);
+    throw new Error(error?.message || "Lỗi AI không thể tạo truyện.");
+  }
+};
