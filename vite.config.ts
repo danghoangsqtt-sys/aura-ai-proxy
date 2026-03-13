@@ -1,25 +1,18 @@
 
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import path from 'path';
 
 export default defineConfig({
   plugins: [react()],
   base: './',
   resolve: {
     alias: {
-      '@pixi/utils': 'pixi.js',
-      '@pixi/math': 'pixi.js',
-      '@pixi/constants': 'pixi.js',
-      '@pixi/display': 'pixi.js',
-      '@pixi/core': 'pixi.js',
-      '@pixi/loaders': 'pixi.js',
-      '@pixi/ticker': 'pixi.js',
-      '@pixi/app': 'pixi.js',
-      '@pixi/interaction': 'pixi.js',
+      'pixi-live2d-display/cubism4': path.resolve(__dirname, 'node_modules/pixi-live2d-display/dist/cubism4.js'),
     },
   },
   optimizeDeps: {
-    include: ['pixi.js', 'pixi-live2d-display', 'pixi-live2d-display/cubism4'],
+    include: ['pixi.js', 'pixi-live2d-display'],
   },
   build: {
     outDir: 'dist',
