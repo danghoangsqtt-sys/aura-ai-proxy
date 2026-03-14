@@ -55,6 +55,17 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ state, mode, volume, modelU
       } as any);
       
       appRef.current = app;
+      
+      // DISABLE PIXI's INTERNAL INTERACTION TO PREVENT MOUSEMOVE CRASHES
+      app.stage.interactive = false;
+      app.stage.interactiveChildren = false;
+
+      // If the interaction plugin exists, completely destroy it to save CPU and stop the error loop
+      if ((app.renderer.plugins as any).interaction) {
+          (app.renderer.plugins as any).interaction.destroy();
+          delete (app.renderer.plugins as any).interaction;
+      }
+
       containerRef.current!.appendChild(app.view as HTMLCanvasElement);
       setStatus('loading');
 
@@ -71,6 +82,7 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ state, mode, volume, modelU
           model.destroy();
           return;
         }
+        (model as any).interactive = false; // Disable internal model hit-testing
         modelRef.current = model as any; // Store ref for LipSync
         app.stage.addChild(model as any);
 

@@ -131,7 +131,7 @@ const App: React.FC = () => {
       </div>
 
       <div className="app-body">
-        <GearSidebar activeTab={activeTab} onTabChange={(tab) => { setActiveTab(tab); if (tab === 'library') setCurrentExamIndex(-1); }} />
+        <GearSidebar activeTab={activeTab as any} onTabChange={(tab: any) => { setActiveTab(tab); if (tab === 'library') setCurrentExamIndex(-1); }} />
 
         <main className="main-workspace" style={{ marginLeft: 0 }}>
           {activeTab === 'create' && (

@@ -243,9 +243,6 @@ export interface DictionaryResponse {
   usageNotes?: string;
 }
 
-/**
- * Tạo Truyện Chêm (Macaronic Story) song ngữ Việt-Anh
- */
 export const generateMacaronicStory = async (wordList: string, topic: string): Promise<string> => {
   const apiKey = await getApiKey();
   if (!apiKey) throw new Error("Chưa cấu hình API Key trong phần Cài đặt.");
@@ -268,3 +265,39 @@ YÊU CẦU BẮT BUỘC: Hãy thay thế các từ tiếng Việt tương ứng 
     throw new Error(error?.message || "Lỗi AI không thể tạo truyện.");
   }
 };
+
+/**
+ * Phòng Luyện Viết (Writing Master) - Chấm điểm và sửa bài chuẩn Aptis ESOL
+ */
+export const evaluateWriting = async (textInput: string): Promise<string> => {
+  const apiKey = await getApiKey();
+  if (!apiKey) throw new Error("Chưa cấu hình API Key trong phần Cài đặt.");
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  const prompt = `Act as an expert Aptis ESOL Writing Examiner. The user is aiming for a B2 band score. 
+Evaluate the following text written by the user:
+"${textInput}"
+
+Please provide your feedback strictly in Markdown format with the following structure:
+### 📊 Ước lượng điểm (Band Score): [A1/A2/B1/B2/C1]
+### 🚨 Phân tích lỗi Ngữ pháp & Chính tả:
+(List the mistakes and explain how to fix them)
+### 💎 Gợi ý Nâng cấp Từ vựng (Vocabulary Upgrades):
+(Suggest 3-5 advanced words/idioms that could replace simpler words in their text to achieve a B2+ level)
+### 💡 Nhận xét chung:
+(Brief encouragement and structural advice)`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: prompt,
+      config: { temperature: 0.2 } // Low temperature for consistent grading
+    });
+    return response.text || '';
+  } catch (error: any) {
+    console.error("Writing Evaluation Error:", error);
+    throw new Error(error?.message || "Hệ thống AI gặp sự cố khi chấm bài.");
+  }
+};
+
