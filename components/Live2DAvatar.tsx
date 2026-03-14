@@ -54,19 +54,23 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ state, mode, volume, modelU
         autoDensity: true,
       } as any);
       
+      // CRITICAL FIX: Block all DOM pointer events from reaching the PIXI canvas.
+      // This stops the InteractionManager from ever triggering 'processPointerOverOut'.
+      const canvas = app.view as HTMLCanvasElement;
+      canvas.style.pointerEvents = 'none';
+
       appRef.current = app;
       
-      // DISABLE PIXI's INTERNAL INTERACTION TO PREVENT MOUSEMOVE CRASHES
-      app.stage.interactive = false;
-      app.stage.interactiveChildren = false;
-
-      // If the interaction plugin exists, completely destroy it to save CPU and stop the error loop
-      if ((app.renderer.plugins as any).interaction) {
-          (app.renderer.plugins as any).interaction.destroy();
+      // Aggressively strip the interaction plugin
+      const interaction = (app.renderer.plugins as any).interaction;
+      if (interaction) {
+          if (typeof interaction.destroy === 'function') {
+              interaction.destroy();
+          }
           delete (app.renderer.plugins as any).interaction;
       }
 
-      containerRef.current!.appendChild(app.view as HTMLCanvasElement);
+      containerRef.current!.appendChild(canvas);
       setStatus('loading');
 
       // Clean up previous model before loading new one
@@ -83,6 +87,9 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ state, mode, volume, modelU
           return;
         }
         (model as any).interactive = false; // Disable internal model hit-testing
+        if ((model as any).internalModel) {
+            (model as any).internalModel.interactive = false;
+        }
         modelRef.current = model as any; // Store ref for LipSync
         app.stage.addChild(model as any);
 
