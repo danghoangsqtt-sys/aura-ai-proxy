@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { IPASound } from '../../data/ipaData';
 import { useGeminiLive } from '../../hooks/useGeminiLive';
+import IPAQuiz from './IPAQuiz';
 
 interface SoundDetailProps {
   sound: IPASound;
@@ -217,15 +218,7 @@ const SoundDetail: React.FC<SoundDetailProps> = ({ sound, onBack }) => {
 
             {/* QUIZ TAB */}
             {activeTab === 'quiz' && (
-              <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 flex flex-col items-center justify-center h-full">
-                <div className="w-20 h-20 mb-6 rounded-2xl bg-amber-100 text-amber-500 flex items-center justify-center">
-                  <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
-                </div>
-                <h3 className="text-xl font-bold text-slate-800 mb-2">Bài tập trắc nghiệm đang xây dựng</h3>
-                <p className="text-slate-500 text-center max-w-sm">
-                  Chức năng kiểm tra nghe và phân biệt âm đang được cập nhật ở phiên bản tiếp theo.
-                </p>
-              </div>
+              <IPAQuiz sound={sound} />
             )}
 
           </div>
