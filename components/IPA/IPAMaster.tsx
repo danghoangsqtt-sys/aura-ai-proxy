@@ -1,15 +1,22 @@
 import React, { useState } from 'react';
 import { IPASound } from '../../data/ipaData';
 import IPAChart from './IPAChart';
+import SoundDetail from './SoundDetail';
 
 const IPAMaster: React.FC = () => {
   const [selectedSound, setSelectedSound] = useState<IPASound | null>(null);
 
   const handleSoundSelect = (sound: IPASound) => {
     setSelectedSound(sound);
-    // Temporary alert to prove state lifting works in Phase 7A
-    alert(`Selected sound: ${sound.symbol} (Type: ${sound.type})`);
   };
+
+  if (selectedSound) {
+    return (
+      <div className="flex flex-col h-full bg-slate-50 overflow-y-auto custom-scrollbar pt-8">
+        <SoundDetail sound={selectedSound} onBack={() => setSelectedSound(null)} />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full bg-slate-50 overflow-y-auto custom-scrollbar">
@@ -31,28 +38,8 @@ const IPAMaster: React.FC = () => {
       {/* Main Content Area */}
       <div className="flex-1 p-8">
         <div className="max-w-6xl mx-auto">
-          {selectedSound ? (
-            <div className="mb-8 p-6 bg-indigo-50 border border-indigo-200 rounded-2xl flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-bold text-indigo-900">Âm đang chọn: <span className="text-3xl font-serif text-indigo-700 ml-2">{selectedSound.symbol}</span></h3>
-                <p className="text-indigo-700 mt-1">{selectedSound.description}</p>
-              </div>
-              <button 
-                onClick={() => setSelectedSound(null)}
-                className="px-4 py-2 bg-white text-indigo-600 font-bold rounded-lg hover:bg-indigo-100 transition-colors"
-              >
-                Đóng
-              </button>
-            </div>
-          ) : (
-             <div className="mb-4 text-center text-slate-500">
-               Click vào một âm trên bảng để luyện tập
-             </div>
-          )}
-          
           <IPAChart 
-            onSoundSelect={handleSoundSelect} 
-            selectedSound={selectedSound} 
+            onSelectSound={handleSoundSelect} 
           />
         </div>
       </div>
