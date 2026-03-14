@@ -128,18 +128,21 @@ const SoundDetail: React.FC<SoundDetailProps> = ({ sound, onBack }) => {
             {/* THEORY TAB */}
             {activeTab === 'theory' && (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <h3 className="text-xl font-bold text-slate-800 mb-6">Video Hướng Dẫn Kỹ Thuật</h3>
-                <div className="aspect-video w-full rounded-2xl overflow-hidden shadow-lg border border-slate-200 bg-slate-900">
-                  <iframe 
-                    width="100%" 
-                    height="100%" 
-                    src={`https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(sound.youtubeQuery)}`}
-                    title="YouTube video player" 
-                    frameBorder="0" 
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
-                    allowFullScreen
-                  ></iframe>
+                <h3 className="text-xl font-bold text-slate-800 mb-6">Video Hướng Dẫn Kỹ Thuật (Offline)</h3>
+                <div className="aspect-video w-full rounded-2xl overflow-hidden shadow-lg border border-slate-200 bg-slate-900 group relative">
+                  <video 
+                    controls
+                    className="w-full h-full object-cover"
+                    src={`/videos/ipa_${sound.symbol.replace(/ː/g, '_long')}.mp4`}
+                    poster={`/videos/posters/ipa_${sound.symbol.replace(/ː/g, '_long')}.jpg`}
+                  >
+                    Trình duyệt của bạn không hỗ trợ thẻ video.
+                  </video>
+                  <div className="absolute inset-0 pointer-events-none border-4 border-transparent group-hover:border-indigo-500/20 transition-colors rounded-2xl"></div>
                 </div>
+                <p className="mt-4 text-sm text-slate-500 text-center">
+                  * Yêu cầu file video `public/videos/ipa_{sound.symbol.replace(/ː/g, '_long')}.mp4`
+                </p>
               </div>
             )}
 

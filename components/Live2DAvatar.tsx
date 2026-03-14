@@ -179,6 +179,23 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ state, mode, volume, modelU
       isMounted = false;
       isInitialized.current = false;
       
+      if (appRef.current) {
+        // Fix PIXI InteractionManager Uncaught TypeError
+        // 1. Disable interactivity to stop processing pointer events during teardown
+        if (appRef.current.stage) {
+            appRef.current.stage.interactiveChildren = false;
+        }
+        
+        // 2. Safely remove model from stage if it exists
+        if (modelRef.current && appRef.current.stage) {
+            appRef.current.stage.removeChild(modelRef.current as any);
+        }
+
+        // 3. Destroy PIXI App safely
+        appRef.current.destroy(true, { children: true, texture: true } as any);
+        appRef.current = null;
+      }
+      
       if (modelRef.current) {
          if ((modelRef.current as any)._cleanupMouseMove) {
              (modelRef.current as any)._cleanupMouseMove();
@@ -186,14 +203,12 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ state, mode, volume, modelU
          if ((modelRef.current as any)._cleanupLipSync) {
              (modelRef.current as any)._cleanupLipSync();
          }
-         modelRef.current.destroy();
+         try {
+             modelRef.current.destroy();
+         } catch (e) {
+             console.error("Live2D Destroy Error:", e);
+         }
          modelRef.current = null;
-      }
-
-      if (appRef.current) {
-        // Destroy PIXI App safely
-        appRef.current.destroy(true, { children: true, texture: true } as any);
-        appRef.current = null;
       }
       
       if (containerRef.current) {
