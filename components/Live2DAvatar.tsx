@@ -1,24 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as PIXI from 'pixi.js';
-
-// CRITICAL: Bind PIXI to window BEFORE importing pixi-live2d-display
-(window as any).PIXI = PIXI;
-
-// @ts-ignore - cubism4 subpath has no type declarations
-import type { Live2DModel } from 'pixi-live2d-display/cubism4';
 import { AppMode, EyeState } from '../types';
 
 interface Live2DAvatarProps {
   state: EyeState;
   mode: AppMode;
   volume: number;
-  modelUrl?: string; // Fallback url
+  modelUrl?: string;
 }
 
 const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ state, mode, volume, modelUrl }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<PIXI.Application | null>(null);
-  const modelRef = useRef<Live2DModel | null>(null);
+  const modelRef = useRef<any>(null); // Use any for model type since we removed the NPM package
   const isInitialized = useRef<boolean>(false);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
 
@@ -27,259 +21,165 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ state, mode, volume, modelU
 
   const volumeRef = useRef(volume);
   const stateRef = useRef(state);
+  
   useEffect(() => {
       volumeRef.current = volume;
       stateRef.current = state;
   }, [volume, state]);
 
   useEffect(() => {
-    // Prevent double initialization in Strict Mode
     if (isInitialized.current || !containerRef.current) return;
     isInitialized.current = true;
     let isMounted = true;
 
-    // 1. Strictly bind PIXI to window first
+    // 1. Expose PIXI globally for the CDN script
     (window as any).PIXI = PIXI;
 
-    // 2. Dynamically import Live2DModel AFTER PIXI is globally available
-    // @ts-ignore - cubism4 subpath has no type declarations
-    import('pixi-live2d-display/cubism4').then(({ Live2DModel }) => {
+    // 2. Helper function to load the CDN script
+    const loadLive2DScript = () => {
+      return new Promise<void>((resolve, reject) => {
+        // If already loaded by another instance
+        if ((window as any).PIXI.live2d) {
+          resolve();
+          return;
+        }
+
+        const scriptId = 'pixi-live2d-display-script';
+        let script = document.getElementById(scriptId) as HTMLScriptElement;
+
+        if (script) {
+          script.onload = () => resolve();
+          script.onerror = () => reject(new Error("Failed to load pixi-live2d-display from CDN"));
+          return;
+        }
+
+        // CRITICAL: Ensure runtimes are available before loading plugin
+        if (!(window as any).Live2D || !(window as any).Live2DCubismCore) {
+           console.warn("Runtimes missing from window. Checking again in 500ms...");
+           setTimeout(() => {
+              if (!(window as any).Live2D || !(window as any).Live2DCubismCore) {
+                reject(new Error("Live2D Runtimes (Cubism 2/4) missing. Check index.html script tags."));
+                return;
+              }
+              loadPlugin();
+           }, 500);
+        } else {
+           loadPlugin();
+        }
+
+        function loadPlugin() {
+          script = document.createElement('script');
+          script.id = scriptId;
+          // Using 0.5.0-beta.7 which is tested with PIXI v7
+          script.src = "https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.5.0-beta.7/dist/index.min.js";
+          
+          script.onload = () => {
+            // Polling for PIXI.live2d
+            let attempts = 0;
+            const interval = setInterval(() => {
+                attempts++;
+                if ((window as any).PIXI.live2d && (window as any).PIXI.live2d.Live2DModel) {
+                   clearInterval(interval);
+                   resolve();
+                } else if (attempts > 20) {
+                   clearInterval(interval);
+                   reject(new Error("PIXI.live2d.Live2DModel failed to initialize after 2 seconds"));
+                }
+            }, 100);
+          };
+          
+          script.onerror = () => reject(new Error("Failed to load pixi-live2d-display from CDN"));
+          document.body.appendChild(script);
+        }
+      });
+    };
+
+    // 3. Initialize App and Load Model
+    loadLive2DScript().then(() => {
       if (!isMounted) return;
 
-      // 3. Initialize PIXI Application
       const app = new PIXI.Application({
         resizeTo: containerRef.current!,
         backgroundAlpha: 0,
         resolution: window.devicePixelRatio || 1,
         autoDensity: true,
-      } as any);
+      });
       
-      // CRITICAL FIX: Block all DOM pointer events from reaching the PIXI canvas.
-      // This stops the InteractionManager from ever triggering 'processPointerOverOut'.
       const canvas = app.view as HTMLCanvasElement;
-      canvas.style.pointerEvents = 'none';
-
-      appRef.current = app;
+      canvas.style.pointerEvents = 'none'; // Critical fix for InteractionManager bugs
       
-      // Aggressively strip the interaction plugin
-      const interaction = (app.renderer.plugins as any).interaction;
-      if (interaction) {
-          if (typeof interaction.destroy === 'function') {
-              interaction.destroy();
-          }
-          delete (app.renderer.plugins as any).interaction;
-      }
-
+      appRef.current = app;
       containerRef.current!.appendChild(canvas);
       setStatus('loading');
 
-      // Clean up previous model before loading new one
-      if (modelRef.current) {
-        app.stage.removeChild(modelRef.current as any);
-        modelRef.current.destroy();
-        modelRef.current = null;
+      if (!(window as any).PIXI.live2d || !(window as any).PIXI.live2d.Live2DModel) {
+          throw new Error("PIXI.live2d.Live2DModel is undefined");
       }
 
-      // 4. Load Live2D Model
-      Live2DModel.from(urlToLoad).then((model) => {
+      const Live2DModel = (window as any).PIXI.live2d.Live2DModel;
+
+      Live2DModel.from(urlToLoad).then((model: any) => {
         if (!isMounted) {
           model.destroy();
           return;
         }
-        (model as any).interactive = false; // Disable internal model hit-testing
-        if ((model as any).internalModel) {
-            (model as any).internalModel.interactive = false;
+        
+        model.interactive = false;
+        if (model.internalModel) {
+             model.internalModel.interactive = false;
         }
-        modelRef.current = model as any; // Store ref for LipSync
-        app.stage.addChild(model as any);
 
+        modelRef.current = model;
+        app.stage.addChild(model);
+
+        // Responsive Fitting
         const fitModel = () => {
           if (!containerRef.current) return;
-          
-          // Use standard Live2D model sizing properties
-          const internalAny = (model as any).internalModel;
+          const internalAny = model.internalModel;
           const modelWidth = internalAny.width || 1;
           const modelHeight = internalAny.height || 1;
           const containerWidth = containerRef.current.clientWidth;
           const containerHeight = containerRef.current.clientHeight;
 
-          // 1. SMART COVER ALGORITHM
-          // Calculate scales for both dimensions independently.
-          // Y-Scale: We want the model to be roughly 2x the height of the container to hide the lower body.
           const targetScaleY = (containerHeight / modelHeight) * 2.0; 
-
-          // X-Scale: We want to ensure the model's width fills at least 110% of the container width to avoid empty margins.
           const targetScaleX = (containerWidth / modelWidth) * 1.1;
-
-          // Take the LARGER of the two scales. 
-          // - On Mobile (tall): targetScaleY will dominate, keeping the head-to-waist ratio perfect.
-          // - On Desktop (wide): targetScaleX will dominate, preventing the model from becoming too narrow.
-          // Tweak 2.0 (for body shown) and 0.05 (for headroom) to perfect specific models.
           const scale = Math.max(targetScaleX, targetScaleY);
+          
           model.scale.set(scale);
-
-          // 2. Center Horizontally
           model.x = (containerWidth - modelWidth * scale) / 2;
-
-          // 3. Responsive Top-Anchoring
-          // Instead of fixed pixels, push the head down by exactly 5% of the container's height.
-          // This ensures the padding looks identical on a tiny phone screen and a massive monitor.
           model.y = containerHeight * 0.05;
         };
 
         fitModel();
         setStatus('ready');
 
-        // Global Pointer tracking
-        const handleMouseMove = (e: MouseEvent) => {
-            if (!containerRef.current || !modelRef.current) return;
-            const rect = containerRef.current.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            modelRef.current.focus(x, y);
-        };
-        window.addEventListener('mousemove', handleMouseMove);
-
-        // Store cleanup directly on model so we can remove it on unmount
-        (model as any)._cleanupMouseMove = () => {
-            window.removeEventListener('mousemove', handleMouseMove);
-        };
-
-        // HIGH-PERFORMANCE LIP-SYNC
-        // Track the value locally in JS to ELIMINATE expensive WASM reads
-        let currentOpen = 0; 
-
-        const lipSyncUpdate = () => {
-            const coreModel = model.internalModel.coreModel as any;
-            if (!coreModel) return;
-
-            const vol = volumeRef.current;
-            let targetOpen = 0;
-            
-            if (stateRef.current === EyeState.SPEAKING || vol > 0.05) {
-                targetOpen = vol > 1.0 ? Math.min(1.0, vol / 60.0) : Math.min(1.0, vol * 5.0);
-            }
-
-            // Pure JS math (Super fast, zero main-thread blocking)
-            currentOpen += (targetOpen - currentOpen) * 0.4;
-
-            // Write to WASM — detect Cubism version at runtime to prevent crashes
-            if (currentOpen > 0.01 || targetOpen === 0) {
-                if (typeof coreModel.setParameterValueById === 'function') {
-                    // Cubism 3/4/5
-                    coreModel.setParameterValueById('ParamMouthOpenY', currentOpen);
-                    coreModel.setParameterValueById('PARAM_MOUTH_OPEN_Y', currentOpen);
-                } else if (typeof coreModel.setParamFloat === 'function') {
-                    // Cubism 2 (Legacy)
-                    coreModel.setParamFloat('PARAM_MOUTH_OPEN_Y', currentOpen);
-                }
-            }
-        };
-
-        // Attach to Live2D's internal update cycle, NOT the global PIXI ticker
-        model.internalModel.on('beforeModelUpdate', lipSyncUpdate);
-
-        // Save cleanup reference
-        (model as any)._cleanupLipSync = () => {
-            model.internalModel.off('beforeModelUpdate', lipSyncUpdate);
-        };
-
-      }).catch((err) => {
+      }).catch((err: any) => {
         console.error('Failed to load Live2D model:', err);
         if (isMounted) setStatus('error');
       });
+
     }).catch((err) => {
-      console.error('Failed to load pixi-live2d-display module:', err);
+      console.error(err);
       if (isMounted) setStatus('error');
     });
 
-    // Cleanup on unmount
     return () => {
       isMounted = false;
       isInitialized.current = false;
       
-      if (appRef.current) {
-        // Fix PIXI InteractionManager Uncaught TypeError deep in Ticker._tick
-        // 1. Dừng Ticker NGAY LẬP TỨC để tránh gọi update() trong quá trình gỡ bỏ
-        appRef.current.ticker.stop();
-        
-        // 2. Hủy hoàn toàn InteractionManager (Gây ra lỗi Uncaught TypeError)
-        if (appRef.current.renderer && (appRef.current.renderer as any).plugins && (appRef.current.renderer as any).plugins.interaction) {
-             try {
-                 (appRef.current.renderer as any).plugins.interaction.destroy();
-             } catch (e) {
-                 console.error("InteractionManager Destroy Error:", e);
-             }
-        }
-      }
-      
       if (modelRef.current) {
-         if ((modelRef.current as any)._cleanupMouseMove) {
-             (modelRef.current as any)._cleanupMouseMove();
-         }
-         if ((modelRef.current as any)._cleanupLipSync) {
-             (modelRef.current as any)._cleanupLipSync();
-         }
-         try {
-             modelRef.current.destroy();
-         } catch (e) {
-             console.error("Live2D Destroy Error:", e);
-         }
+         modelRef.current.destroy();
          modelRef.current = null;
       }
-      
       if (appRef.current) {
-        // 3. Destroy PIXI App safely
-        try {
-            appRef.current.destroy(true, { children: true, texture: true } as any);
-        } catch (e) {
-            console.error("PIXI App Destroy Error:", e);
-        }
+        appRef.current.destroy(true, { children: true, texture: true, baseTexture: true });
         appRef.current = null;
       }
-      
       if (containerRef.current) {
           containerRef.current.innerHTML = '';
       }
     };
   }, [urlToLoad]);
-
-
-
-  // Handle Resize natively through PIXI resizeTo
-  useEffect(() => {
-    const handleResize = () => {
-        if (appRef.current && modelRef.current && containerRef.current) {
-             const model = modelRef.current as any;
-             const internalAny = model.internalModel;
-             const MathMin = Math.min;
-             
-             if (internalAny) {
-                 const modelWidth = internalAny.width || 1;
-                 const modelHeight = internalAny.height || 1;
-                 const containerWidth = containerRef.current.clientWidth;
-                 const containerHeight = containerRef.current.clientHeight;
-
-                 // 1. SMART COVER ALGORITHM
-                 const targetScaleY = (containerHeight / modelHeight) * 2.0; 
-                 const targetScaleX = (containerWidth / modelWidth) * 1.1;
-
-                 // Pick the larger scale to satisfy both minimum width and minimum height constraints
-                 const scale = Math.max(targetScaleX, targetScaleY);
-                 model.scale.set(scale);
-
-                 // 2. Center Horizontally
-                 model.x = (containerWidth - modelWidth * scale) / 2;
-                 
-                 // 3. Responsive Top-Anchoring (5% headroom)
-                 model.y = containerHeight * 0.05;
-             }
-        }
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
 
   return (
     <div className="relative w-full h-full">

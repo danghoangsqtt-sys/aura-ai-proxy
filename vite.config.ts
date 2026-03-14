@@ -11,15 +11,13 @@ export default defineConfig({
   base: './',
   resolve: {
     alias: {
-      'pixi-live2d-display/cubism4': 'pixi-live2d-display/dist/cubism4.js',
-      'pixi-live2d-display/cubism2': 'pixi-live2d-display/dist/cubism2.js',
+      'pixi.js': 'pixi.js',
     },
   },
   optimizeDeps: {
     include: [
       'pixi.js',
       'pixi-live2d-display',
-      'pixi-live2d-display/cubism4',
     ],
   },
   build: {
