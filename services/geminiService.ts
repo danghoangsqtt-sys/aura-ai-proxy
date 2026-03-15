@@ -53,7 +53,7 @@ export const extractVocabularyFromFile = async (base64Data: string, mimeType: st
   if (!apiKey) throw new Error("Chưa cấu hình API Key trong phần Cài đặt.");
   
   const ai = new GoogleGenAI({ apiKey });
-  const model = 'gemini-3-flash-preview'; // Dùng bản 3.0 Pro/Flash để đọc ảnh/PDF tốt hơn
+  const model = 'gemini-2.0-flash'; // Dùng bản 2.0 Flash ổn định
 
   const prompt = `
     Đóng vai trò là một chuyên gia ngôn ngữ học và số hóa tài liệu.
@@ -136,7 +136,7 @@ export const generateExamContent = async (config: ExamConfig): Promise<Question[
   
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.0-flash',
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -185,7 +185,7 @@ export const regenerateSingleQuestion = async (config: ExamConfig, oldQuestion: 
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.0-flash',
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -224,7 +224,7 @@ export const analyzeLanguage = async (text: string): Promise<DictionaryResponse>
   const ai = new GoogleGenAI({ apiKey });
   const prompt = `Phân tích từ/câu: "${text}"`;
   const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
+    model: 'gemini-2.0-flash',
     contents: prompt,
     config: { responseMimeType: "application/json" }
   });
@@ -255,7 +255,7 @@ YÊU CẦU BẮT BUỘC: Hãy thay thế các từ tiếng Việt tương ứng 
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.0-flash',
       contents: prompt,
       config: { temperature: 0.9 }
     });
@@ -275,22 +275,22 @@ export const evaluateWriting = async (textInput: string): Promise<string> => {
 
   const ai = new GoogleGenAI({ apiKey });
 
-  const prompt = `Act as an expert Aptis ESOL Writing Examiner. The user is aiming for a B2 band score. 
-Evaluate the following text written by the user:
-"${textInput}"
+  const prompt = `Act as an expert Aptis ESOL / IELTS Writing Examiner. Evaluate the user's text for a B2 target.
+  Must output ONLY in strictly formatted Markdown.
+  Structure required:
+  ### 📊 Ước lượng điểm (Band Score): [Your Score]
+  ### 🚨 Phân tích lỗi Ngữ pháp & Chính tả:
+  - **[Lỗi sai]** -> **[Cách sửa]**: [Giải thích ngắn gọn]
+  ### 💎 Gợi ý Nâng cấp Từ vựng (Vocabulary):
+  - Thay vì dùng **[Từ cũ]**, hãy dùng **[Từ vựng B2/C1]**: [Câu ví dụ]
+  ### 💡 Nhận xét chung & Cấu trúc bài:
+  [Feedback của bạn]
 
-Please provide your feedback strictly in Markdown format with the following structure:
-### 📊 Ước lượng điểm (Band Score): [A1/A2/B1/B2/C1]
-### 🚨 Phân tích lỗi Ngữ pháp & Chính tả:
-(List the mistakes and explain how to fix them)
-### 💎 Gợi ý Nâng cấp Từ vựng (Vocabulary Upgrades):
-(Suggest 3-5 advanced words/idioms that could replace simpler words in their text to achieve a B2+ level)
-### 💡 Nhận xét chung:
-(Brief encouragement and structural advice)`;
+  User text: "${textInput}"`;
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.0-flash',
       contents: prompt,
       config: { temperature: 0.2 } // Low temperature for consistent grading
     });
@@ -300,4 +300,102 @@ Please provide your feedback strictly in Markdown format with the following stru
     throw new Error(error?.message || "Hệ thống AI gặp sự cố khi chấm bài.");
   }
 };
+
+/**
+ * Phân tích cấu tạo từ (Word Formation) - Tiền tố, Gốc từ, Hậu tố
+ */
+export const analyzeWordFormation = async (word: string): Promise<WordFormationResponse> => {
+  const apiKey = await getApiKey();
+  if (!apiKey) throw new Error("Chưa cấu hình API Key trong phần Cài đặt.");
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  const prompt = `Act as an expert linguist. Analyze the word: '${word}'. 
+  Break it down into prefix, root, and suffix. If a part doesn't exist, return null.
+  Provide 3 related words in the same word family.
+  Must return strictly in JSON format matching this schema:
+  {
+    "word": "string",
+    "prefix": { "morpheme": "string", "meaning": "string" } | null,
+    "root": { "morpheme": "string", "meaning": "string" },
+    "suffix": { "morpheme": "string", "meaning": "string" } | null,
+    "family": ["string", "string", "string"]
+  }`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.0-flash',
+      contents: prompt,
+      config: { 
+        responseMimeType: "application/json",
+        temperature: 0.1 
+      }
+    });
+    
+    return JSON.parse(cleanJsonResponse(response.text)) as WordFormationResponse;
+  } catch (error: any) {
+    console.error("Word Formation Error:", error);
+    throw new Error(error?.message || "Hệ thống AI gặp sự cố khi phân tích cấu tạo từ.");
+  }
+};
+
+export interface WordFormationResponse {
+  word: string;
+  prefix: { morpheme: string; meaning: string } | null;
+  root: { morpheme: string; meaning: string };
+  suffix: { morpheme: string; meaning: string } | null;
+  family: string[];
+}
+
+/**
+ * Sinh Sơ đồ tư duy từ vựng (Vocab Mind Map)
+ */
+export const generateVocabMindMap = async (topic: string): Promise<VocabMindMapResponse> => {
+  const apiKey = await getApiKey();
+  if (!apiKey) throw new Error("Chưa cấu hình API Key trong phần Cài đặt.");
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  const prompt = `Act as an English vocabulary expert. Generate a mind map for the topic: '${topic}'.
+  Categorize the vocabulary into 3 to 4 branches (e.g., Types, Causes, Solutions, Adjectives).
+  Each branch should have 3 to 5 related English words with their Vietnamese meanings and a fitting emoji.
+  Must return STRICTLY in JSON format matching this schema:
+  {
+    "centralTopic": "string",
+    "centralEmoji": "string",
+    "branches": [
+      {
+        "categoryName": "string",
+        "words": [
+          { "word": "string", "meaning": "string", "emoji": "string" }
+        ]
+      }
+    ]
+  }`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.0-flash',
+      contents: prompt,
+      config: { 
+        responseMimeType: "application/json",
+        temperature: 0.7 
+      }
+    });
+    
+    return JSON.parse(cleanJsonResponse(response.text)) as VocabMindMapResponse;
+  } catch (error: any) {
+    console.error("Vocab Mind Map Error:", error);
+    throw new Error(error?.message || "Hệ thống AI gặp sự cố khi sinh sơ đồ tư duy.");
+  }
+};
+
+export interface VocabMindMapResponse {
+  centralTopic: string;
+  centralEmoji: string;
+  branches: {
+    categoryName: string;
+    words: { word: string; meaning: string; emoji: string }[];
+  }[];
+}
 

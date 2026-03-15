@@ -37,20 +37,26 @@ export const useGeminiLive = () => {
         liveServiceRef.current.onConnected = async () => {
             setConnected(true);
             
-            // Start recording and sending audio once WS is open
-            audioRecorderRef.current = new AudioRecorder();
-            await audioRecorderRef.current.start((base64Data) => {
-                liveServiceRef.current?.sendAudio(base64Data);
-            });
+            try {
+                // Start recording and sending audio once WS is open and setup is complete
+                audioRecorderRef.current = new AudioRecorder();
+                await audioRecorderRef.current.start((base64Data) => {
+                    liveServiceRef.current?.sendAudio(base64Data);
+                });
+            } catch (micErr) {
+                console.error('[useGeminiLive] -> [Audio Initialization Failed]:', micErr);
+                disconnect();
+            }
         };
 
         liveServiceRef.current.onDisconnected = () => {
+            console.info('[useGeminiLive] -> [Status]: Disconnected from Gemini Live.');
             setConnected(false);
             stopAudio();
         };
 
         liveServiceRef.current.onError = (error) => {
-            console.error('Gemini Live Service Error:', error);
+            console.error('[useGeminiLive] -> [ERROR]: Gemini Live Service Error:', error);
             disconnect();
         };
 
@@ -69,7 +75,7 @@ export const useGeminiLive = () => {
         liveServiceRef.current.connect(instruction);
 
     } catch (err) {
-        console.error("Failed to connect to Gemini Live:", err);
+        console.error("[useGeminiLive] -> [Critical Error]:", err);
         disconnect();
     }
   };

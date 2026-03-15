@@ -5,27 +5,39 @@ export class AudioRecorder {
   private processor: ScriptProcessorNode | null = null;
 
   async start(onAudioData: (base64Data: string) => void) {
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 } });
-    this.audioContext = new AudioContext({ sampleRate: 16000 });
-    this.source = this.audioContext.createMediaStreamSource(this.stream);
-    
-    // ScriptProcessorNode is deprecated but widely supported for simple PCM conversion
-    this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
-
-    this.processor.onaudioprocess = (e) => {
-      const inputData = e.inputBuffer.getChannelData(0);
-      const pcm16Data = new Int16Array(inputData.length);
-      for (let i = 0; i < inputData.length; ++i) {
-        pcm16Data[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
-      }
+    try {
+      console.info('[AudioRecorder] -> [Action]: Requesting Microphone permission...');
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 } });
+      this.audioContext = new AudioContext({ sampleRate: 16000 });
+      this.source = this.audioContext.createMediaStreamSource(this.stream);
       
-      const buffer = pcm16Data.buffer;
-      const base64 = btoa(new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), ''));
-      onAudioData(base64);
-    };
+      // ScriptProcessorNode is deprecated but widely supported for simple PCM conversion
+      this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
 
-    this.source.connect(this.processor);
-    this.processor.connect(this.audioContext.destination);
+      this.processor.onaudioprocess = (e) => {
+        const inputData = e.inputBuffer.getChannelData(0);
+        const pcm16Data = new Int16Array(inputData.length);
+        for (let i = 0; i < inputData.length; ++i) {
+          pcm16Data[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
+        }
+        
+        const buffer = pcm16Data.buffer;
+        const uint8Array = new Uint8Array(buffer);
+        let binary = '';
+        const len = uint8Array.byteLength;
+        for (let i = 0; i < len; i++) {
+          binary += String.fromCharCode(uint8Array[i]);
+        }
+        const base64 = btoa(binary);
+        onAudioData(base64);
+      };
+
+      this.source.connect(this.processor);
+      this.processor.connect(this.audioContext.destination);
+    } catch (error) {
+      console.error('[AudioRecorder] -> [ERROR]: Mic permission denied or initialization failed', error);
+      throw error;
+    }
   }
 
   stop() {
@@ -54,6 +66,7 @@ export class AudioPlayer {
   private isProcessing = false;
   private queue: Float32Array[] = [];
   private onVolumeChange?: (volume: number) => void;
+  private animationFrameId: number | null = null;
 
   constructor(onVolumeChange?: (volume: number) => void) {
     this.audioContext = new AudioContext({ sampleRate: 24000 }); // Gemini output is typically 24kHz
@@ -77,8 +90,8 @@ export class AudioPlayer {
       // Normalize roughly to 0-1
       const normalizedVolume = Math.min(1.0, average / 100.0);
       this.onVolumeChange(normalizedVolume);
+      this.animationFrameId = requestAnimationFrame(this.loopAnalysys);
     }
-    requestAnimationFrame(this.loopAnalysys);
   };
 
   playPcm16Base64(base64: string) {
@@ -130,6 +143,10 @@ export class AudioPlayer {
 
   stop() {
     this.queue = [];
+    if (this.animationFrameId !== null) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
     if (this.audioContext && this.audioContext.state !== 'closed') {
       this.audioContext.close();
     }

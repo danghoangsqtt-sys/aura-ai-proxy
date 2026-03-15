@@ -60,20 +60,44 @@ export const useLive2D = ({ containerRef, modelUrl, volume, state }: UseLive2DOp
     isInitialized.current = true;
     let isMounted = true;
 
+    const waitForScripts = (maxRetries = 50): Promise<void> => {
+      return new Promise((resolve, reject) => {
+        let retries = 0;
+        const check = () => {
+          if ((window as any).Live2DCubismCore) {
+            resolve();
+          } else if (retries < maxRetries) {
+            retries++;
+            requestAnimationFrame(check);
+          } else {
+            reject(new Error("External Live2D scripts failed to load in time."));
+          }
+        };
+        check();
+      });
+    };
+
     const init = async () => {
       try {
+        console.info('[Live2D Engine] -> [Action]: Waiting for external PIXI/Live2D scripts...');
+        await waitForScripts();
+
         // Dynamically import the plugin to ensure window.PIXI is set
         const { Live2DModel } = await import('pixi-live2d-display');
 
         if (!isMounted || !containerRef.current) return;
 
         const app = new PIXI.Application({
+          view: document.createElement('canvas'),
           resizeTo: containerRef.current,
-          backgroundAlpha: 0,
+          transparent: true,
           resolution: window.devicePixelRatio || 1,
           autoDensity: true,
+          antialias: true,
+          powerPreference: 'high-performance'
         });
 
+        // Ensure the view is a canvas
         const canvas = app.view as HTMLCanvasElement;
         canvas.style.pointerEvents = 'none';
 
@@ -84,7 +108,7 @@ export const useLive2D = ({ containerRef, modelUrl, volume, state }: UseLive2DOp
 
         if (!isMounted) {
           model.destroy();
-          app.destroy(true);
+          app.destroy(true, { children: true, texture: true, baseTexture: true });
           return;
         }
 
@@ -142,10 +166,13 @@ export const useLive2D = ({ containerRef, modelUrl, volume, state }: UseLive2DOp
           model.internalModel.off('beforeModelUpdate', lipSyncUpdate);
         };
 
-        setLive2DState({ status: 'ready' });
+        if (isMounted) {
+            console.info('[Live2D Engine] -> [Success]: Avatar loaded and rendered.');
+            setLive2DState({ status: 'ready' });
+        }
 
       } catch (err: any) {
-        console.error("Live2D Init Error:", err);
+        console.error('[Live2D Engine] -> [ERROR]: Failed to initialize avatar', err);
         if (isMounted) setLive2DState({ status: 'error', error: err.message });
       }
     };
@@ -153,6 +180,7 @@ export const useLive2D = ({ containerRef, modelUrl, volume, state }: UseLive2DOp
     init();
 
     return () => {
+      console.info('[Live2D Engine] -> [Action]: Destroying WebGL context and releasing GPU memory.');
       isMounted = false;
       isInitialized.current = false;
       if (modelRef.current) {

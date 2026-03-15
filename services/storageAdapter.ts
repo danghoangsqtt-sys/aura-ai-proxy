@@ -24,22 +24,31 @@ export const storage = {
     if (isElectron()) {
       try {
         const { ipcRenderer } = (window as any).require('electron');
-        // Gọi xuống main.js để đọc file
         const data = await ipcRenderer.invoke('db-read', key);
         if (data === null || data === undefined) return defaultValue;
         return data as T;
       } catch (e) {
-        console.error(`[Electron] Read error for ${key}:`, e);
+        console.error(`[Storage Adapter] -> [Electron ERROR] Read error for ${key}:`, e);
       }
     }
     
-    // Fallback cho trình duyệt hoặc nếu lỗi
+    // Fallback cho trình duyệt
+    const item = localStorage.getItem(key);
+    if (!item) return defaultValue;
+
     try {
-      const item = localStorage.getItem(key);
-      return item ? JSON.parse(item) : defaultValue;
+      // Thử parse JSON
+      return JSON.parse(item) as T;
     } catch (e) {
-      // Trường hợp API Key là string trơn không phải JSON
-      return (localStorage.getItem(key) as unknown as T) || defaultValue;
+      // Trường hợp Data bị hỏng hoặc không phải JSON (VD: API Key là string trơn)
+      console.warn(`[Storage Adapter] -> [Warning]: Data corruption detected for key "${key}". Falling back to default or raw value.`, e);
+      
+      // Nếu là string trơn, trả về chính nó nếu kiểu T cho phép, nếu không trả về defaultValue
+      try {
+          return item as unknown as T;
+      } catch (innerErr) {
+          return defaultValue;
+      }
     }
   },
 
@@ -50,19 +59,24 @@ export const storage = {
     if (isElectron()) {
       try {
         const { ipcRenderer } = (window as any).require('electron');
-        // Gọi xuống main.js để ghi file
         await ipcRenderer.invoke('db-write', key, value);
         return;
       } catch (e) {
-        console.error(`[Electron] Write error for ${key}:`, e);
+        console.error(`[Storage Adapter] -> [Electron ERROR] Write error for ${key}:`, e);
       }
     }
 
     // Fallback LocalStorage
-    if (typeof value === 'string') {
-        localStorage.setItem(key, value);
-    } else {
-        localStorage.setItem(key, JSON.stringify(value));
+    try {
+        const valueToStore = typeof value === 'string' ? value : JSON.stringify(value);
+        localStorage.setItem(key, valueToStore);
+        // Tùy chọn: console.info(`[Storage Adapter] -> [Success]: Data saved for key "${key}".`);
+    } catch (e: any) {
+        if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
+            console.error(`[Storage Adapter] -> [CRITICAL ERROR]: LocalStorage Quota Exceeded when saving key "${key}".`, e);
+        } else {
+            console.error(`[Storage Adapter] -> [ERROR]: Failed to save key "${key}" to LocalStorage.`, e);
+        }
     }
   },
 

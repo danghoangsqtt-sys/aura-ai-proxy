@@ -2,20 +2,17 @@
   "name": "edugen-studio-pro",
   "version": "1.0.7",
   "description": "Hệ thống biên soạn đề thi thông minh AI",
-  "main": "main.js",
   "changelog": [
-    "Sửa lỗi Content Security Policy (CSP) chặn kết nối API",
-    "Sửa lỗi (intermediate value).text is not a function",
-    "Cập nhật hệ thống kiểm tra phiên bản tự động",
-    "Tích hợp react-markdown và remark-gfm để hiển thị nội dung AI chuyên nghiệp",
-    "Tối ưu hóa tốc độ tải ứng dụng"
+    "Chuyển đổi sang kiến trúc SaaS (Web App)",
+    "Tích hợp Appwrite cho hệ thống xác thực và dữ liệu đám mây",
+    "Gỡ bỏ hoàn toàn sự phụ thuộc vào Electron",
+    "Tối ưu hóa cho môi trường trình duyệt thuần túy"
   ],
   "scripts": {
-    "start": "electron .",
+    "start": "vite",
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "package": "npm run build && electron-builder"
+    "preview": "vite preview"
   },
   "keywords": [],
   "author": "EduGen Team",
@@ -24,54 +21,20 @@
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@vitejs/plugin-react": "^4.7.0",
-    "electron": "^41.0.2",
-    "electron-builder": "^26.8.1",
     "typescript": "^5.2.2",
-    "vite": "^8.0.0"
+    "vite": "^7.0.0"
   },
   "dependencies": {
     "@google/genai": "^1.35.0",
+    "appwrite": "^17.0.2",
     "lucide-react": "^0.378.0",
     "mammoth": "^1.11.0",
     "pdfjs-dist": "^5.4.530",
-    "pixi-live2d-display": "^0.4.0",
-    "pixi.js": "^7.4.2",
+    "pixi-live2d-display": "^0.3.1",
+    "pixi.js": "^6.5.10",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^9.1.0",
     "remark-gfm": "^4.0.1"
-  },
-  "build": {
-    "appId": "com.edugen.studiopro",
-    "productName": "EduGen Studio Professional",
-    "copyright": "Copyright © 2026 Dang Hoang",
-    "directories": {
-      "output": "dist_electron"
-    },
-    "files": [
-      "dist/**/*",
-      "main.js",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "public",
-        "to": "public",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ],
-    "win": {
-      "target": "nsis",
-      "icon": "public/icon.ico"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "installerIcon": "public/icon.ico",
-      "uninstallerIcon": "public/icon.ico"
-    }
   }
 }

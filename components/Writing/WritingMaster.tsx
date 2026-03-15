@@ -22,11 +22,16 @@ const WritingMaster: React.FC = () => {
     setError(null);
     setFeedback(null);
 
+    console.info(`[WritingMaster] -> [Action]: Sending text to Gemini API for evaluation. Word count: ${wordCount}`);
+
     try {
       const response = await evaluateWriting(text);
       setFeedback(response);
+      console.info('[WritingMaster] -> [Success]: Received evaluation feedback from API.');
     } catch (err: any) {
-      setError(err.message || 'Lỗi kết nối. Vui lòng thử lại sau.');
+      const errorMessage = err.message || 'Lỗi kết nối. Vui lòng thử lại sau.';
+      setError(errorMessage);
+      console.error('[WritingMaster] -> [ERROR]: Failed to evaluate writing:', err);
     } finally {
       setIsLoading(false);
     }

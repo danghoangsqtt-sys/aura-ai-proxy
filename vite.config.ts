@@ -8,7 +8,7 @@ export default defineConfig({
   define: {
     'global': 'window',
   },
-  base: './',
+  base: '/',
   resolve: {
     alias: {
       'pixi.js': 'pixi.js',
@@ -27,6 +27,7 @@ export default defineConfig({
       include: [/pixi-live2d-display/, /node_modules/],
       transformMixedEsModules: true,
     },
+    target: 'esnext'
   },
   server: {
     port: 5173,

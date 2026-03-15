@@ -1,7 +1,7 @@
-
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { Question } from '../types';
 import GameFeedback from './GameFeedback';
+import GameTimer, { GameTimerHandle } from './GameTimer';
 
 interface QuizModeProps {
   questions: Question[];
@@ -14,28 +14,35 @@ const QuizMode: React.FC<QuizModeProps> = ({ questions, playerName, onFinish, on
   const [currentIdx, setCurrentIdx] = useState(0);
   const [score, setScore] = useState(0);
   const [streak, setStreak] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(15);
   const [feedback, setFeedback] = useState<{correct: boolean, msg: string, explanation?: string} | null>(null);
+  
+  const timerRef = useRef<GameTimerHandle>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const q = questions[currentIdx];
+  const q = useMemo(() => questions[currentIdx], [questions, currentIdx]);
 
   useEffect(() => {
-    let timer: number;
-    if (timeLeft > 0 && !feedback) {
-      timer = window.setInterval(() => setTimeLeft(prev => prev - 1), 1000);
-    } else if (timeLeft === 0 && !feedback) {
-      handleAnswer("");
-    }
-    return () => clearInterval(timer);
-  }, [timeLeft, feedback]);
+    console.info('[Gamification] -> [Action]: Game started (Quiz Mode). Timer initialized.');
+  }, []);
 
-  const handleAnswer = (answer: string) => {
+  const nextQuestion = useCallback(() => {
+    setFeedback(null);
+    if (currentIdx < questions.length - 1) {
+      setCurrentIdx(prev => prev + 1);
+      timerRef.current?.reset(15);
+    } else {
+      onFinish(score, streak);
+    }
+  }, [currentIdx, questions.length, onFinish, score, streak]);
+
+  const handleAnswer = useCallback((answer: string) => {
     if (feedback) return;
     const isCorrect = answer.toLowerCase().trim() === q.correctAnswer.toLowerCase().trim();
     
+    const remainingTime = timerRef.current?.getValue() || 0;
+
     if (isCorrect) {
-      const bonus = timeLeft * 10 + streak * 20;
+      const bonus = Math.floor(remainingTime * 10 + streak * 20);
       setScore(prev => prev + 100 + bonus);
       setStreak(prev => prev + 1);
       setFeedback({ correct: true, msg: "Bạn làm rất tốt!", explanation: q.explanation });
@@ -43,18 +50,15 @@ const QuizMode: React.FC<QuizModeProps> = ({ questions, playerName, onFinish, on
     } else {
       setStreak(0);
       setFeedback({ correct: false, msg: `Đáp án: ${q.correctAnswer}`, explanation: q.explanation });
+      timerRef.current?.stop();
     }
-  };
+  }, [feedback, q, nextQuestion, streak]);
 
-  const nextQuestion = () => {
-    setFeedback(null);
-    if (currentIdx < questions.length - 1) {
-      setCurrentIdx(prev => prev + 1);
-      setTimeLeft(15);
-    } else {
-      onFinish(score, streak);
+  const onTimeUp = useCallback(() => {
+    if (!feedback) {
+        handleAnswer("");
     }
-  };
+  }, [feedback, handleAnswer]);
 
   return (
     <div className="flex-1 flex flex-col max-w-2xl mx-auto w-full py-4 relative animate-content">
@@ -76,7 +80,17 @@ const QuizMode: React.FC<QuizModeProps> = ({ questions, playerName, onFinish, on
             <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest">SCORE</p>
             <p className="text-lg font-black text-indigo-600 tabular-nums">{score}</p>
           </div>
-          <div className={`w-10 h-10 rounded-xl border-2 flex items-center justify-center font-black text-sm transition-colors ${timeLeft < 5 ? 'border-rose-500 text-rose-500 animate-pulse' : 'border-indigo-500 text-indigo-500'}`}>{timeLeft}</div>
+          <GameTimer 
+            ref={timerRef}
+            initialValue={15}
+            type="time"
+            intervalMs={1000}
+            decrement={1}
+            onEnd={onTimeUp}
+            className="w-24"
+            barColor="bg-indigo-500"
+            showSeconds={true}
+          />
         </div>
       </div>
 

@@ -1,7 +1,7 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { Question } from '../types';
 import GameFeedback from './GameFeedback';
+import GameTimer, { GameTimerHandle } from './GameTimer';
 
 interface SurvivalModeProps {
   questions: Question[];
@@ -14,46 +14,45 @@ const SurvivalMode: React.FC<SurvivalModeProps> = ({ questions, playerName, onFi
   const [currentIdx, setCurrentIdx] = useState(0);
   const [score, setScore] = useState(0);
   const [streak, setStreak] = useState(0);
-  const [hp, setHp] = useState(100);
   const [feedback, setFeedback] = useState<{correct: boolean, msg: string, explanation?: string} | null>(null);
 
-  const q = questions[currentIdx];
+  const timerRef = useRef<GameTimerHandle>(null);
+  
+  const q = useMemo(() => questions[currentIdx], [questions, currentIdx]);
 
   useEffect(() => {
-    let timer: number;
-    if (hp > 0 && !feedback) {
-      timer = window.setInterval(() => setHp(prev => Math.max(0, prev - 1.2)), 100);
-    } else if (hp <= 0) {
-      onFinish(score, streak);
-    }
-    return () => clearInterval(timer);
-  }, [hp, feedback]);
+    console.info('[Gamification] -> [Action]: Game started (Survival Mode). HP Timer initialized.');
+  }, []);
 
-  const handleAnswer = (answer: string) => {
-    if (feedback) return;
-    const isCorrect = answer.toLowerCase().trim() === q.correctAnswer.toLowerCase().trim();
-    
-    if (isCorrect) {
-      setHp(prev => Math.min(100, prev + 25));
-      setScore(prev => prev + 250);
-      setStreak(prev => prev + 1);
-      setFeedback({ correct: true, msg: "+25HP ❤️", explanation: q.explanation });
-      setTimeout(nextQuestion, 1200);
-    } else {
-      setHp(prev => Math.max(0, prev - 30));
-      setStreak(0);
-      setFeedback({ correct: false, msg: "-30HP 💔", explanation: q.explanation });
-    }
-  };
-
-  const nextQuestion = () => {
+  const nextQuestion = useCallback(() => {
     setFeedback(null);
     if (currentIdx < questions.length - 1) {
       setCurrentIdx(prev => prev + 1);
     } else {
       onFinish(score, streak);
     }
-  };
+  }, [currentIdx, questions.length, onFinish, score, streak]);
+
+  const handleAnswer = useCallback((answer: string) => {
+    if (feedback) return;
+    const isCorrect = answer.toLowerCase().trim() === q.correctAnswer.toLowerCase().trim();
+    
+    if (isCorrect) {
+      timerRef.current?.addValue(25);
+      setScore(prev => prev + 250);
+      setStreak(prev => prev + 1);
+      setFeedback({ correct: true, msg: "+25HP ❤️", explanation: q.explanation });
+      setTimeout(nextQuestion, 1200);
+    } else {
+      timerRef.current?.addValue(-30);
+      setStreak(0);
+      setFeedback({ correct: false, msg: "-30HP 💔", explanation: q.explanation });
+    }
+  }, [feedback, q, nextQuestion]);
+
+  const onDead = useCallback(() => {
+    onFinish(score, streak);
+  }, [onFinish, score, streak]);
 
   return (
     <div className="flex-1 flex flex-col max-w-2xl mx-auto w-full py-4 relative animate-content">
@@ -73,14 +72,17 @@ const SurvivalMode: React.FC<SurvivalModeProps> = ({ questions, playerName, onFi
       <div className="mb-8 space-y-2 px-6">
         <div className="flex justify-between items-end text-[10px] font-black uppercase tracking-widest text-rose-600">
            <span>Vitality</span>
-           <span className={`${hp < 30 ? 'animate-pulse scale-110' : ''}`}>{Math.ceil(hp)}%</span>
         </div>
-        <div className="w-full bg-slate-100 h-5 rounded-2xl p-1 border border-slate-200 shadow-inner">
-          <div 
-            className={`h-full rounded-xl transition-all duration-300 ${hp < 30 ? 'bg-rose-600 shadow-[0_0_15px_rgba(225,29,72,0.5)] animate-pulse' : 'bg-gradient-to-r from-rose-500 to-orange-400 shadow-lg shadow-rose-100'}`}
-            style={{ width: `${hp}%` }}
-          ></div>
-        </div>
+        <GameTimer 
+            ref={timerRef}
+            initialValue={100}
+            type="hp"
+            intervalMs={100}
+            decrement={1.2}
+            onEnd={onDead}
+            barColor="bg-gradient-to-r from-rose-500 to-orange-400"
+            showPercent={true}
+        />
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-center p-8 bg-white rounded-[40px] shadow-[0_25px_60px_rgba(225,29,72,0.1)] border border-rose-50 relative overflow-hidden">

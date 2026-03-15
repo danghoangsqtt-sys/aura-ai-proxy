@@ -2,8 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { ExamConfig, ExamPaper as ExamPaperType, Question } from './types';
 import { generateExamContent } from './services/geminiService';
-import { checkAppUpdate } from './services/updateService';
-import { storage, STORAGE_KEYS } from './services/storageAdapter'; // Sử dụng adapter mới
+import { storage, STORAGE_KEYS } from './services/storageAdapter';
 import ConfigPanel from './components/ConfigPanel';
 import ExamPaper from './components/ExamPaper';
 import AnswerSheet from './components/AnswerSheet';
@@ -18,6 +17,9 @@ import FloatingAura from './components/FloatingAura';
 import MacaronicStory from './components/MacaronicStory';
 import IPAMaster from './components/IPA/IPAMaster';
 import GearSidebar from './components/GearSidebar';
+import { authService } from './services/authService';
+import { cloudSyncService } from './services/cloudSyncService';
+import AuthModal from './components/Auth/AuthModal';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'create' | 'library' | 'game' | 'chatbot' | 'settings' | 'dictionary' | 'vocab' | 'speaking' | 'story' | 'ipa'>('create');
@@ -26,36 +28,57 @@ const App: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [viewMode, setViewMode] = useState<'exam' | 'answer' | 'both'>('exam');
   const [showPrintMenu, setShowPrintMenu] = useState(false);
-  const [newUpdateAvailable, setNewUpdateAvailable] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
 
   const currentExam = currentExamIndex >= 0 ? examList[currentExamIndex] : null;
 
-  const handleWindowControl = (action: 'window-minimize' | 'window-maximize' | 'window-close') => {
-    try {
-      // @ts-ignore
-      const { ipcRenderer } = window.require('electron');
-      ipcRenderer.send(action);
-    } catch (e) {
-      console.warn("Desktop feature only.");
+  useEffect(() => {
+    const initApp = async () => {
+      console.info('[App] -> [Action]: Checking user session...');
+      setIsAuthChecking(true);
+      try {
+        const user = await authService.getCurrentUser();
+        if (user) {
+          setCurrentUser(user);
+          // Đồng bộ dữ liệu từ Cloud khi login thành công
+          const cloudData = await cloudSyncService.fetchDataFromCloud(user.$id);
+          if (cloudData && cloudData.exams) {
+            setExamList(cloudData.exams);
+          } else {
+            // Nếu cloud chưa có, dùng local tạm
+            const savedExams = await storage.get<ExamPaperType[]>(STORAGE_KEYS.EXAMS, []);
+            setExamList(savedExams);
+          }
+        }
+      } catch (err) {
+        console.error('[App] -> [ERROR]: Session check failed:', err);
+      } finally {
+        setIsAuthChecking(false);
+      }
+    };
+    initApp();
+  }, []);
+
+  const handleAuthSuccess = async (user: any) => {
+    setCurrentUser(user);
+    // Kéo data cloud sau khi login
+    const cloudData = await cloudSyncService.fetchDataFromCloud(user.$id);
+    if (cloudData && cloudData.exams) {
+      setExamList(cloudData.exams);
     }
   };
 
-  useEffect(() => {
-    // LOAD DỮ LIỆU TỪ Ổ CỨNG (ASYNC)
-    const loadData = async () => {
-      const savedExams = await storage.get<ExamPaperType[]>(STORAGE_KEYS.EXAMS, []);
-      setExamList(savedExams);
-    };
-    loadData();
-
-    const checkUpdates = async () => {
-      try {
-        const update = await checkAppUpdate();
-        if (update.hasUpdate) setNewUpdateAvailable(true);
-      } catch (err) {}
-    };
-    checkUpdates();
-  }, []);
+  const handleLogout = async () => {
+    if (!window.confirm("Bạn có chắc muốn đăng xuất?")) return;
+    try {
+      await authService.logout();
+      setCurrentUser(null);
+      setExamList([]);
+    } catch (err) {
+      console.error("Logout error:", err);
+    }
+  };
 
   const handleGenerate = async (config: ExamConfig) => {
     setIsGenerating(true);
@@ -73,6 +96,11 @@ const App: React.FC = () => {
       
       // LƯU XUỐNG Ổ CỨNG
       await storage.set(STORAGE_KEYS.EXAMS, newList);
+      
+      // ĐỒNG BỘ LÊN CLOUD
+      if (currentUser) {
+        await cloudSyncService.syncDataToCloud(currentUser.$id, { exams: newList });
+      }
       
       setCurrentExamIndex(0);
       setActiveTab('library');
@@ -93,16 +121,21 @@ const App: React.FC = () => {
     updatedExamList[currentExamIndex] = updatedExam;
     
     setExamList(updatedExamList);
-    // LƯU XUỐNG Ổ CỨNG
     await storage.set(STORAGE_KEYS.EXAMS, updatedExamList);
+    if (currentUser) {
+      await cloudSyncService.syncDataToCloud(currentUser.$id, { exams: updatedExamList });
+    }
   };
 
   const deleteExam = async (id: string) => {
     if (!window.confirm("Xác nhận xóa đề thi?")) return;
     const newList = examList.filter(e => e.id !== id);
     setExamList(newList);
-    // LƯU XUỐNG Ổ CỨNG
     await storage.set(STORAGE_KEYS.EXAMS, newList);
+    
+    if (currentUser) {
+      await cloudSyncService.syncDataToCloud(currentUser.$id, { exams: newList });
+    }
     
     if (currentExam?.id === id) setCurrentExamIndex(-1);
   };
@@ -113,24 +146,49 @@ const App: React.FC = () => {
     setTimeout(() => window.print(), 500);
   };
 
+  // Skip desktop update checks and window controls as we migrated to web
+
+  if (isAuthChecking) {
+    return (
+      <div className="fixed inset-0 bg-white flex flex-col items-center justify-center">
+        <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Đang khởi tạo...</p>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return <AuthModal onSuccess={handleAuthSuccess} />;
+  }
+
   return (
     <div className="desktop-window">
-      <div className="title-bar no-print" style={{ WebkitAppRegion: 'drag' } as any}>
+      <div className="h-14 bg-white border-b px-6 flex items-center justify-between no-print">
         <div className="flex items-center gap-3">
-           <div className="w-5 h-5 bg-indigo-600 rounded flex items-center justify-center">
-             <span className="text-[10px] text-white font-black">E</span>
+           <div className="w-6 h-6 bg-indigo-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-200">
+             <span className="text-[10px] text-white font-black italic">A</span>
            </div>
-           <span className="text-[10px] font-black text-slate-700 uppercase tracking-[2px]">EduGen Studio Pro</span>
+           <span className="text-xs font-black text-slate-800 uppercase tracking-[3px]">Aura Edu Studio</span>
         </div>
-        <div className="flex-1"></div>
-        <div className="window-controls" style={{ WebkitAppRegion: 'no-drag' } as any}>
-          <div onClick={() => handleWindowControl('window-minimize')} className="control-btn"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M20 12H4" /></svg></div>
-          <div onClick={() => handleWindowControl('window-maximize')} className="control-btn"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg></div>
-          <div onClick={() => handleWindowControl('window-close')} className="control-btn close-btn"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" /></svg></div>
+        
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-3 px-4 py-2 bg-slate-50 rounded-2xl border border-slate-100">
+            <div className="w-6 h-6 bg-indigo-100 rounded-full flex items-center justify-center text-[10px] font-black text-indigo-600">
+              {currentUser.name.charAt(0)}
+            </div>
+            <span className="text-[11px] font-black text-slate-700">{currentUser.name}</span>
+          </div>
+          <button 
+            onClick={handleLogout}
+            className="p-2.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
+            title="Đăng xuất"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+          </button>
         </div>
       </div>
 
-      <div className="app-body">
+      <div className="app-body" style={{ height: 'calc(100vh - 56px)' }}>
         <GearSidebar activeTab={activeTab as any} onTabChange={(tab: any) => { setActiveTab(tab); if (tab === 'library') setCurrentExamIndex(-1); }} />
 
         <main className="main-workspace" style={{ marginLeft: 0 }}>

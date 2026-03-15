@@ -26,17 +26,16 @@ export const checkAppUpdate = async (): Promise<AppUpdate> => {
     const remoteData = await response.json();
     const remoteVersion = remoteData.version;
 
-    console.log(`Local: ${CURRENT_VERSION} - Remote: ${remoteVersion}`); // Log để debug
+    console.log(`✅ [Update] Local: ${CURRENT_VERSION} - Remote: ${remoteVersion}`);
 
     return {
       version: remoteVersion,
       changelog: remoteData.changelog || [],
-      // Link đến trang Release để người dùng tải file .exe
       downloadUrl: "https://github.com/danghoangsqtt-sys/edugen-app/releases/latest",
       hasUpdate: isNewerVersion(remoteVersion, CURRENT_VERSION)
     };
   } catch (error) {
-    console.error("Lỗi kiểm tra cập nhật:", error);
+    console.error("❌ [Update] Lỗi kiểm tra cập nhật:", error);
     return { version: CURRENT_VERSION, changelog: [], downloadUrl: "", hasUpdate: false };
   }
 };

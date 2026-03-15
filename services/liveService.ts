@@ -19,8 +19,10 @@ export class LiveService {
     this.ws = new WebSocket(this.url);
 
     this.ws.onopen = () => {
+      console.info('[LiveService] -> [Action]: WebSocket opened. Sending Setup Message...');
       this.sendSetupMessage();
-      if (this.onConnected) this.onConnected();
+      // REMOVED: if (this.onConnected) this.onConnected(); 
+      // We must wait for setupComplete from the server.
     };
 
     this.ws.onmessage = (event) => {
@@ -36,23 +38,33 @@ export class LiveService {
              this.handleMessageStr(event.data);
         }
       } catch (e) {
-        console.error("Error parsing message", e);
+        console.error('[LiveService] -> [ERROR]: Message parsing failed', e);
       }
     };
 
     this.ws.onclose = () => {
+      console.info('[LiveService] -> [Status]: WebSocket closed.');
       this.ws = null;
       if (this.onDisconnected) this.onDisconnected();
     };
 
     this.ws.onerror = (error) => {
-      console.error('WebSocket Error:', error);
+      console.error('[LiveService] -> [ERROR]: WebSocket error:', error);
       if (this.onError) this.onError(error);
     };
   }
   
   private handleMessageStr(str: string) {
       const data = JSON.parse(str);
+
+      // Check for setup completion
+      if (data.setupComplete) {
+          console.info('[LiveService] -> [Connected]: Gemini Server Setup Complete. Ready for audio.');
+          if (this.onConnected) {
+              this.onConnected();
+          }
+      }
+
       if (this.onMessage) {
           this.onMessage(data);
       }
@@ -74,17 +86,11 @@ export class LiveService {
 
   sendAudio(base64Pcm: string) {
     const msg = {
-      clientContent: {
-        turns: [{
-            role: "user",
-            parts: [{
-                inlineData: {
-                    mimeType: "audio/pcm;rate=16000",
-                    data: base64Pcm
-                }
-            }]
-        }],
-        turnComplete: true
+      realtimeInput: {
+        mediaChunks: [{
+            mimeType: "audio/pcm;rate=16000",
+            data: base64Pcm
+        }]
       }
     };
     this.send(msg);

@@ -21,6 +21,10 @@ dist_electron/release/
 *.zip
 *.blockmap
 
+.env.local
+.env.example
+.env
+
 .vscode/*
 !.vscode/extensions.json
 .idea

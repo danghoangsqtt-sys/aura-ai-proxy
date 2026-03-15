@@ -1,7 +1,7 @@
-
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { Question } from '../types';
 import GameFeedback from './GameFeedback';
+import GameTimer, { GameTimerHandle } from './GameTimer';
 
 interface BlitzModeProps {
   questions: Question[];
@@ -14,28 +14,35 @@ const BlitzMode: React.FC<BlitzModeProps> = ({ questions, playerName, onFinish, 
   const [currentIdx, setCurrentIdx] = useState(0);
   const [score, setScore] = useState(0);
   const [streak, setStreak] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(500); // 5.00 seconds in 10ms units
   const [feedback, setFeedback] = useState<{correct: boolean, msg: string, explanation?: string} | null>(null);
+  
+  const timerRef = useRef<GameTimerHandle>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   
-  const q = questions[currentIdx];
+  const q = useMemo(() => questions[currentIdx], [questions, currentIdx]);
 
   useEffect(() => {
-    let timer: number;
-    if (timeLeft > 0 && !feedback) {
-      timer = window.setInterval(() => setTimeLeft(prev => prev - 1), 10);
-    } else if (timeLeft === 0 && !feedback) {
-      handleAnswer("");
-    }
-    return () => clearInterval(timer);
-  }, [timeLeft, feedback]);
+    console.info('[Gamification] -> [Action]: Game started (Blitz Mode). Timer initialized.');
+  }, []);
 
-  const handleAnswer = (answer: string) => {
+  const nextQuestion = useCallback(() => {
+    setFeedback(null);
+    if (currentIdx < questions.length - 1) {
+      setCurrentIdx(prev => prev + 1);
+      timerRef.current?.reset(500);
+    } else {
+      onFinish(score, streak);
+    }
+  }, [currentIdx, questions.length, onFinish, score, streak]);
+
+  const handleAnswer = useCallback((answer: string) => {
     if (feedback) return;
     const isCorrect = answer.toLowerCase().trim() === q.correctAnswer.toLowerCase().trim();
     
+    const remainingTime = timerRef.current?.getValue() || 0;
+
     if (isCorrect) {
-      const speedBonus = Math.floor(timeLeft * 2);
+      const speedBonus = Math.floor(remainingTime * 2);
       setScore(prev => prev + 200 + speedBonus);
       setStreak(prev => prev + 1);
       setFeedback({ correct: true, msg: `+${200 + speedBonus}⚡`, explanation: q.explanation });
@@ -43,18 +50,15 @@ const BlitzMode: React.FC<BlitzModeProps> = ({ questions, playerName, onFinish, 
     } else {
       setStreak(0);
       setFeedback({ correct: false, msg: "HẾT TỐC ĐỘ!", explanation: q.explanation });
+      timerRef.current?.stop();
     }
-  };
+  }, [feedback, q, nextQuestion]);
 
-  const nextQuestion = () => {
-    setFeedback(null);
-    if (currentIdx < questions.length - 1) {
-      setCurrentIdx(prev => prev + 1);
-      setTimeLeft(500);
-    } else {
-      onFinish(score, streak);
+  const onTimeUp = useCallback(() => {
+    if (!feedback) {
+        handleAnswer("");
     }
-  };
+  }, [feedback, handleAnswer]);
 
   return (
     <div className="flex-1 flex flex-col max-w-xl mx-auto w-full py-4 relative bg-[#0a0a0c] text-white p-6 rounded-[40px] border border-yellow-500/20 shadow-[0_0_50px_rgba(234,179,8,0.1)] animate-content">
@@ -75,12 +79,16 @@ const BlitzMode: React.FC<BlitzModeProps> = ({ questions, playerName, onFinish, 
         </div>
       </div>
 
-      <div className="w-full bg-white/5 h-2.5 rounded-full mb-10 overflow-hidden p-0.5 border border-white/5">
-        <div 
-          className={`h-full transition-all duration-75 rounded-full ${timeLeft < 150 ? 'bg-rose-500 shadow-[0_0_20px_rgba(239,68,68,0.6)]' : 'bg-yellow-400 shadow-[0_0_15px_rgba(234,179,8,0.5)]'}`}
-          style={{ width: `${(timeLeft / 500) * 100}%` }}
-        ></div>
-      </div>
+      <GameTimer 
+        ref={timerRef}
+        initialValue={500} 
+        type="time" 
+        intervalMs={10} 
+        decrement={1} 
+        onEnd={onTimeUp}
+        barColor="bg-yellow-400"
+        className="mb-10"
+      />
 
       <div className="flex-1 flex flex-col items-center justify-center space-y-8 text-center">
         <div className="relative">
