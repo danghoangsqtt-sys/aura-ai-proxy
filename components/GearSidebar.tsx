@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-type TabKey = 'create' | 'library' | 'game' | 'chatbot' | 'settings' | 'dictionary' | 'vocab' | 'speaking' | 'story' | 'ipa' | 'writing';
+type TabKey = 'create' | 'library' | 'game' | 'chatbot' | 'settings' | 'dictionary' | 'speaking' | 'story' | 'ipa' | 'writing';
 
 interface NavItem {
   key: TabKey;
@@ -12,7 +12,6 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { key: 'create',     label: 'Soạn đề',     emoji: '✏️', color: 'from-indigo-500 to-blue-500' },
   { key: 'library',    label: 'Thư viện',     emoji: '📚', color: 'from-violet-500 to-purple-500' },
-  { key: 'vocab',      label: 'Từ vựng',      emoji: '📖', color: 'from-cyan-500 to-teal-500' },
   { key: 'story',      label: 'Truyện Chêm',  emoji: '📝', color: 'from-pink-500 to-rose-500' },
   { key: 'dictionary', label: 'Từ điển',      emoji: '🔤', color: 'from-amber-500 to-orange-500' },
   { key: 'speaking',   label: 'Speaking',     emoji: '🎤', color: 'from-emerald-500 to-green-500' },

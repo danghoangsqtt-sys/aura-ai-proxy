@@ -1,5 +1,5 @@
 
-import { VocabularyItem } from '../types';
+import { VocabularyItem, PersonalVocabData } from '../types';
 import { storage, STORAGE_KEYS } from './storageAdapter';
 
 export const vocabStorage = {
@@ -33,5 +33,25 @@ export const vocabStorage = {
   getByTopic: async (topic: string): Promise<VocabularyItem[]> => {
     const list = await vocabStorage.getAll();
     return list.filter(v => v.topic === topic);
+  }
+};
+
+export const canvasStorage = {
+  /**
+   * Lấy toàn bộ dữ liệu Canvas (Inbox + Folders)
+   */
+  get: async (): Promise<PersonalVocabData> => {
+    return await storage.get<PersonalVocabData>(STORAGE_KEYS.VOCAB_CANVAS, {
+      inbox: [],
+      folders: []
+    });
+  },
+
+  /**
+   * Lưu dữ liệu Canvas
+   */
+  save: async (data: PersonalVocabData): Promise<boolean> => {
+    await storage.set(STORAGE_KEYS.VOCAB_CANVAS, data);
+    return true;
   }
 };

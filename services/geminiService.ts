@@ -13,6 +13,30 @@ const cleanJsonResponse = (text: string): string => {
   return text.replace(/```json/g, "").replace(/```/g, "").trim();
 };
 
+const handleGeminiError = (error: any): never => {
+  console.error("Gemini API Error:", error);
+  
+  // Kiểm tra lỗi 429 (Too Many Requests) hoặc RESOURCE_EXHAUSTED
+  if (error?.status === 429 || error?.message?.includes("429") || error?.message?.includes("RESOURCE_EXHAUSTED")) {
+    let retryMsg = "Bạn đã hết lượt gọi AI miễn phí trong phút này. Vui lòng thử lại sau 1 phút.";
+    
+    // Thử trích xuất retryDelay từ chi tiết lỗi (thường nằm trong error.details)
+    const retryDelay = error?.details?.[0]?.retryDelay;
+    if (retryDelay) {
+      // Chuyển đổi từ giây (ví dụ "60s") hoặc số sang giây
+      const seconds = typeof retryDelay === 'string' ? retryDelay.replace('s', '') : Math.ceil(retryDelay / 1000);
+      retryMsg = `Hệ thống đang quá tải. Vui lòng thử lại sau ${seconds} giây.`;
+    }
+    
+    throw new Error(retryMsg);
+  }
+
+  if (error?.message?.includes("API key not valid")) {
+    throw new Error("API Key không hợp lệ. Vui lòng kiểm tra lại trong phần Cài đặt.");
+  }
+  throw new Error(error?.message || "Hệ thống AI gặp sự cố. Vui lòng thử lại sau.");
+};
+
 /**
  * Sinh ảnh minh họa cho từ vựng (Sử dụng cho game Vision Linker)
  */
@@ -102,6 +126,68 @@ export const extractVocabularyFromFile = async (base64Data: string, mimeType: st
   } catch (error: any) {
     console.error("Extract Error:", error);
     throw new Error(error?.message || "Lỗi AI không thể đọc file.");
+  }
+};
+
+/**
+ * Trích xuất từ vựng từ văn bản thô
+ */
+export const extractVocabFromText = async (text: string): Promise<any[]> => {
+  const apiKey = await getApiKey();
+  if (!apiKey) throw new Error("Chưa cấu hình API Key.");
+  
+  const ai = new GoogleGenAI({ apiKey });
+  const prompt = `
+    Đóng vai trò là một chuyên gia ngôn ngữ học. 
+    Nhiệm vụ: Phân tích đoạn văn bản sau và trích xuất khoảng 10-15 từ vựng quan trọng/học thuật nhất.
+    Yêu cầu:
+    1. Trả về đúng định dạng JSON Array.
+    2. Mỗi đối tượng gồm: { "word": "từ", "ipa": "/phiên_âm/", "meaning": "nghĩa_tiếng_việt", "pos": "n/v/adj/adv thối" }.
+    3. Ưu tiên từ vựng trình độ B2 trở lên.
+
+    Văn bản: "${text}"
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.0-flash',
+      contents: prompt,
+      config: { 
+        responseMimeType: "application/json",
+        temperature: 0.7 
+      }
+    });
+    
+    return JSON.parse(cleanJsonResponse(response.text));
+  } catch (error: any) {
+    handleGeminiError(error);
+  }
+};
+
+/**
+ * Gợi ý các nhánh/từ vựng liên quan cho Mind Map
+ */
+export const suggestMindMapBranches = async (topic: string, currentWord: string): Promise<string[]> => {
+  const apiKey = await getApiKey();
+  if (!apiKey) throw new Error("Chưa cấu hình API Key.");
+  
+  const ai = new GoogleGenAI({ apiKey });
+  const prompt = `Give me 4 closely related English vocabulary words for the word '${currentWord}' in the context of '${topic}'. 
+  Return ONLY a JSON array of strings: ["word1", "word2", "word3", "word4"].`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.0-flash',
+      contents: prompt,
+      config: { 
+        responseMimeType: "application/json",
+        temperature: 0.8 
+      }
+    });
+    
+    return JSON.parse(cleanJsonResponse(response.text));
+  } catch (error: any) {
+    handleGeminiError(error);
   }
 };
 

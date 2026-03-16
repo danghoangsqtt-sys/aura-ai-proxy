@@ -123,3 +123,39 @@ export enum AppMode {
   VOICE = 'voice',
   IDLE = 'idle'
 }
+
+// --- PERSONAL VOCAB CANVAS TYPES ---
+export interface SavedWord {
+  id: string;
+  word: string;
+  meaning: string;
+  ipa: string;
+  pronunciation?: string;
+  partOfSpeech?: string;
+  example?: string;
+}
+
+export interface VocabFolder {
+  id: string;
+  name: string;
+  words: SavedWord[];
+  color?: string;
+  position?: { x: number; y: number };
+}
+
+export interface MindMapData {
+  nodes: any[];
+  edges: any[];
+}
+
+export interface MindMapTopic {
+  id: string;
+  name: string;
+  data: MindMapData;
+}
+
+export interface PersonalVocabData {
+  inbox: SavedWord[];
+  folders: VocabFolder[];
+  topics?: MindMapTopic[];
+}

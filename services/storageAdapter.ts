@@ -9,7 +9,8 @@ export const STORAGE_KEYS = {
   API_KEY: 'edugen_api_key',
   LEADERBOARD: 'edugen_leaderboard',
   SPEAKING_MANUAL: 'edugen_speaking_manual',
-  SPEAKING_TOPIC_BANK: 'edugen_speaking_topic_bank'
+  SPEAKING_TOPIC_BANK: 'edugen_speaking_topic_bank',
+  VOCAB_CANVAS: 'edugen_vocab_canvas'
 };
 
 const isElectron = () => {
@@ -40,15 +41,13 @@ export const storage = {
       // Thử parse JSON
       return JSON.parse(item) as T;
     } catch (e) {
-      // Trường hợp Data bị hỏng hoặc không phải JSON (VD: API Key là string trơn)
-      console.warn(`[Storage Adapter] -> [Warning]: Data corruption detected for key "${key}". Falling back to default or raw value.`, e);
-      
-      // Nếu là string trơn, trả về chính nó nếu kiểu T cho phép, nếu không trả về defaultValue
-      try {
+      // Nếu là chuỗi thuần (như API Key), SyntaxError sẽ xảy ra.
+      // Trả về chuỗi raw ban đầu thay vì ném ra lỗi.
+      if (e instanceof SyntaxError) {
           return item as unknown as T;
-      } catch (innerErr) {
-          return defaultValue;
       }
+      console.warn(`[Storage Adapter] -> [Warning]: Data corruption detected for key "${key}".`, e);
+      return defaultValue;
     }
   },
 

@@ -11,7 +11,6 @@ import SettingsPanel from './components/SettingsPanel';
 import LibraryPanel from './components/LibraryPanel';
 import ChatbotPanel from './components/ChatbotPanel';
 import DictionaryPanel from './components/DictionaryPanel';
-import VocabBankPanel from './components/VocabBankPanel';
 import SpeakingArena from './components/SpeakingArena';
 import FloatingAura from './components/FloatingAura';
 import MacaronicStory from './components/MacaronicStory';
@@ -20,9 +19,10 @@ import GearSidebar from './components/GearSidebar';
 import { authService } from './services/authService';
 import { cloudSyncService } from './services/cloudSyncService';
 import AuthModal from './components/Auth/AuthModal';
+import WritingMaster from './components/Writing/WritingMaster';
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'create' | 'library' | 'game' | 'chatbot' | 'settings' | 'dictionary' | 'vocab' | 'speaking' | 'story' | 'ipa'>('create');
+  const [activeTab, setActiveTab] = useState<'create' | 'library' | 'game' | 'chatbot' | 'settings' | 'dictionary' | 'speaking' | 'story' | 'ipa' | 'writing'>('create');
   const [examList, setExamList] = useState<ExamPaperType[]>([]);
   const [currentExamIndex, setCurrentExamIndex] = useState<number>(-1);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -189,7 +189,11 @@ const App: React.FC = () => {
       </div>
 
       <div className="app-body" style={{ height: 'calc(100vh - 56px)' }}>
-        <GearSidebar activeTab={activeTab as any} onTabChange={(tab: any) => { setActiveTab(tab); if (tab === 'library') setCurrentExamIndex(-1); }} />
+        <GearSidebar activeTab={activeTab as any} onTabChange={(tab: any) => { 
+          console.info('[App] -> [Routing]: Switching to tab:', tab);
+          setActiveTab(tab); 
+          if (tab === 'library') setCurrentExamIndex(-1); 
+        }} />
 
         <main className="main-workspace" style={{ marginLeft: 0 }}>
           {activeTab === 'create' && (
@@ -206,10 +210,10 @@ const App: React.FC = () => {
           )}
 
           {activeTab === 'library' && !currentExam && <LibraryPanel exams={examList} onSelect={(id) => setCurrentExamIndex(examList.findIndex(e => e.id === id))} onDelete={deleteExam} />}
-          {activeTab === 'vocab' && <VocabBankPanel />}
           {activeTab === 'story' && <MacaronicStory />}
           {activeTab === 'speaking' && <div className="h-full animate-content"><SpeakingArena /></div>}
           {activeTab === 'ipa' && <IPAMaster />}
+          {activeTab === 'writing' && <div className="h-full animate-content"><WritingMaster /></div>}
           {activeTab === 'dictionary' && <div className="h-full p-6 animate-content"><DictionaryPanel /></div>}
           {activeTab === 'chatbot' && <div className="h-full animate-content"><ChatbotPanel /></div>}
           {activeTab === 'game' && <div className="h-full animate-content"><GameCenter initialQuestions={currentExam?.questions || []} initialExamTitle={currentExam?.config.title || ""} examList={examList} /></div>}
