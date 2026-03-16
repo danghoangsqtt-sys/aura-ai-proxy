@@ -23,65 +23,47 @@ const MindMapNode = ({ id, data, selected }: NodeProps) => {
     }
   };
 
-  const onAiSuggest = () => {
-    if (typeof (data as any).onAiSuggest === 'function') {
-      (data as any).onAiSuggest(id, data.label);
-    }
-  };
-
   const onDelete = () => {
+    console.info(`[MindMapNode] Requesting deletion for node: ${id}`);
     if (typeof (data as any).onDeleteNode === 'function') {
       (data as any).onDeleteNode(id);
     }
   };
 
-  // Determine text color based on background
+  // Determine text color and glow based on background
   const bgColor = (data.color as string) || '#ffffff';
   const isDark = ['#4f46e5', '#ef4444', '#22c55e', '#6366f1'].includes(bgColor);
   const textColor = isDark ? 'text-white' : 'text-slate-800';
+  const glassBg = bgColor === '#ffffff' ? 'bg-white/70' : '';
 
   return (
     <div 
-      className={`group relative p-4 rounded-2xl border-2 transition-all duration-300 shadow-xl min-w-[150px]
-        ${selected ? 'ring-4 ring-indigo-50 border-indigo-400' : 'border-slate-100 hover:border-indigo-300'}`}
-      style={{ backgroundColor: bgColor, borderColor: selected ? undefined : bgColor === '#ffffff' ? undefined : bgColor }}
+      className={`group relative p-4 rounded-[2rem] border transition-all duration-500 backdrop-blur-md shadow-2xl min-w-[150px]
+        ${glassBg}
+        ${selected ? 'ring-[6px] ring-indigo-500/10 border-indigo-400 shadow-indigo-100/50' : 'border-white/20 hover:border-indigo-300 shadow-slate-200/50'}`}
+      style={{ backgroundColor: bgColor !== '#ffffff' ? `${bgColor}dd` : undefined, borderColor: selected ? undefined : bgColor === '#ffffff' ? undefined : `${bgColor}44` }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      {/* Node Toolbar (Pro Features) */}
-      <NodeToolbar isVisible={selected} position={Position.Top} className="flex gap-2 bg-white p-2 rounded-2xl shadow-2xl border border-slate-100 mb-2 animate-in fade-in zoom-in-95 duration-200">
+      <NodeToolbar isVisible={selected} position={Position.Top} className="flex gap-2 bg-white/80 backdrop-blur-xl p-2 rounded-2xl shadow-2xl border border-white/50 mb-2 animate-in fade-in zoom-in-95 duration-300">
         {/* Colors */}
-        <div className="flex gap-1 border-r border-slate-100 pr-2 mr-2">
+        <div className="flex gap-1 border-r border-slate-200 pr-2 mr-2">
             {['#ffffff', '#4f46e5', '#6366f1', '#22c55e', '#ef4444', '#f59e0b'].map(c => (
                 <button 
                     key={c}
                     onClick={() => onColorChange(c)}
                     title={`Chọn màu: ${c}`}
-                    className="w-5 h-5 rounded-full border border-slate-200 transition-transform hover:scale-125"
+                    className="w-5 h-5 rounded-full border border-slate-100 transition-all hover:scale-125 hover:rotate-12 shadow-sm"
                     style={{ backgroundColor: c }}
                 />
             ))}
         </div>
-        
-        {/* AI Suggest */}
-        <button 
-            onClick={onAiSuggest}
-            disabled={!!data.isAiLoading}
-            title="Gợi ý từ vựng AI"
-            className={`p-2 rounded-lg transition-colors ${data.isAiLoading ? 'bg-indigo-50 text-indigo-300' : 'hover:bg-indigo-50 text-indigo-600'}`}
-        >
-            {data.isAiLoading ? (
-                <div className="w-4 h-4 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
-            ) : (
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-7.714 2.143L11 21l-2.286-6.857L1 12l7.714-2.143L11 3z" /></svg>
-            )}
-        </button>
 
         {/* Delete */}
         <button 
             onClick={onDelete}
             title="Xóa nhánh"
-            className="p-2 hover:bg-rose-50 text-rose-500 rounded-lg transition-colors"
+            className="p-2 hover:bg-rose-500 hover:text-white text-rose-500 rounded-xl transition-all active:scale-95"
         >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
         </button>
@@ -102,7 +84,7 @@ const MindMapNode = ({ id, data, selected }: NodeProps) => {
         onChange={onTextChange}
         placeholder="Nhập nội dung..."
         rows={1}
-        className={`w-full bg-transparent border-none outline-none text-center font-black uppercase text-[11px] tracking-widest resize-none overflow-hidden custom-scrollbar ${textColor}`}
+        className={`w-full bg-transparent border-none outline-none text-center font-bold text-[12px] tracking-wide resize-none overflow-hidden custom-scrollbar ${textColor} leading-tight`}
         style={{ height: 'auto' }}
         onInput={(e) => {
           const target = e.target as HTMLTextAreaElement;

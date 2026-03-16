@@ -74,6 +74,12 @@ export class LiveService {
     const setupMsg = {
       setup: {
         model: "models/gemini-2.0-flash-exp",
+        generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+                voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } }
+            }
+        },
         systemInstruction: {
           parts: [{
             text: this.instruction
@@ -81,7 +87,23 @@ export class LiveService {
         }
       }
     };
+    console.info('[LiveService] -> [Action]: Sending Setup Payload:', JSON.stringify(setupMsg));
     this.send(setupMsg);
+
+    // Auto-greeting: Send a user turn to prompt Aura to greet the user
+    setTimeout(() => {
+        console.info('[LiveService] -> [Action]: Sending Auto-Greeting prompt...');
+        const greetingMsg = {
+            clientContent: {
+                turns: [{ 
+                    role: "user", 
+                    parts: [{ text: "Hãy đóng vai là Aura. Hãy nói đúng một câu ngắn gọn bằng tiếng Việt: 'Xin chào, mình là Aura, bạn muốn trao đổi gì hôm nay?' và chờ tôi trả lời." }] 
+                }],
+                turnComplete: true
+            }
+        };
+        this.send(greetingMsg);
+    }, 1000);
   }
 
   sendAudio(base64Pcm: string) {

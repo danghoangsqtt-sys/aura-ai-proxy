@@ -19,7 +19,9 @@ import '@xyflow/react/dist/style.css';
 import { v4 as uuidv4 } from 'uuid';
 import { SavedWord, PersonalVocabData, MindMapTopic, MindMapData } from '../../types';
 import { canvasStorage } from '../../services/localDataService';
-import { extractVocabFromText, suggestMindMapBranches } from '../../services/geminiService';
+import { cloudSyncService } from '../../services/cloudSyncService';
+import { account } from '../../services/appwriteConfig';
+import { extractVocabFromText } from '../../services/geminiService';
 import MindMapNode from './MindMapNode';
 
 // Define custom node types
@@ -36,6 +38,10 @@ const VocabBankCanvasContent: React.FC = () => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   
+  // Sync States
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [userId, setUserId] = useState<string | null>(null);
+
   // Scanner States
   const [scannedText, setScannedText] = useState('');
   const [isScanning, setIsScanning] = useState(false);
@@ -44,7 +50,29 @@ const VocabBankCanvasContent: React.FC = () => {
   // Load Data
   useEffect(() => {
     const load = async () => {
-      const savedData = await canvasStorage.get();
+      console.group('[VocabBankCanvas:Init]');
+      let currentUserId = userId;
+      
+      try {
+        const user = await account.get();
+        setUserId(user.$id);
+        currentUserId = user.$id;
+        console.info(`Logged in as: ${user.email} (${user.$id})`);
+      } catch (err) {
+        console.warn('User not logged in, using guest mode (local only)');
+      }
+
+      // Try Cloud first
+      let savedData: PersonalVocabData | null = null;
+      if (currentUserId) {
+        savedData = await cloudSyncService.loadMindmapData(currentUserId);
+      }
+
+      if (!savedData) {
+        console.info('No cloud data found, falling back to local');
+        savedData = await canvasStorage.get();
+      }
+
       setData(savedData);
       
       if (savedData.topics && savedData.topics.length > 0) {
@@ -73,6 +101,7 @@ const VocabBankCanvasContent: React.FC = () => {
         await canvasStorage.save(newData);
       }
       setLoading(false);
+      console.groupEnd();
     };
     load();
   }, [setNodes, setEdges]);
@@ -82,22 +111,46 @@ const VocabBankCanvasContent: React.FC = () => {
     if (loading || !activeTopicId) return;
 
     const syncState = async () => {
-      const updatedTopics = data.topics?.map(t => {
-        if (t.id === activeTopicId) {
-          return { ...t, data: { nodes, edges } };
-        }
-        return t;
-      }) || [];
+      console.group('[VocabBankCanvas:Sync]');
+      const startTime = performance.now();
+      setSyncStatus('saving');
+      
+      try {
+        const updatedTopics = data.topics?.map(t => {
+          if (t.id === activeTopicId) {
+            return { ...t, data: { nodes, edges } };
+          }
+          return t;
+        }) || [];
 
-      const newData = { ...data, topics: updatedTopics };
-      setData(newData);
-      await canvasStorage.save(newData);
+        const newData = { ...data, topics: updatedTopics };
+        setData(newData);
+        
+        // Local Save
+        await canvasStorage.save(newData);
+        
+        // Cloud Save (Debounced entry point)
+        if (userId) {
+          await cloudSyncService.saveMindmapData(userId, newData);
+          setSyncStatus('saved');
+        } else {
+          setSyncStatus('idle');
+        }
+        
+        const duration = performance.now() - startTime;
+        console.info(`Synced ${nodes.length} nodes and ${edges.length} edges in ${duration.toFixed(2)}ms`);
+      } catch (err) {
+        console.error('Sync failed:', err);
+        setSyncStatus('error');
+      } finally {
+        console.groupEnd();
+      }
     };
 
-    // Debounce sync
-    const timer = setTimeout(syncState, 500);
+    // Debounce sync to Cloud (2000ms as requested)
+    const timer = setTimeout(syncState, 2000);
     return () => clearTimeout(timer);
-  }, [nodes, edges, activeTopicId, loading]);
+  }, [nodes, edges, activeTopicId, loading, userId]);
 
   // Topic Management
   const createTopic = async () => {
@@ -126,12 +179,18 @@ const VocabBankCanvasContent: React.FC = () => {
   };
 
   const switchTopic = (id: string) => {
+    console.group(`[VocabBankCanvas:SwitchTopic] -> ${id}`);
     const topic = data.topics?.find(t => t.id === id);
     if (topic) {
+      const startTime = performance.now();
       setActiveTopicId(id);
       setNodes(topic.data.nodes);
       setEdges(topic.data.edges);
+      console.info(`Loaded topic "${topic.name}" in ${(performance.now() - startTime).toFixed(2)}ms`);
+    } else {
+      console.error('Topic constant not found for ID:', id);
     }
+    console.groupEnd();
   };
 
   const deleteTopic = async (id: string, e: React.MouseEvent) => {
@@ -260,58 +319,6 @@ const VocabBankCanvasContent: React.FC = () => {
     setEdges((eds) => eds.filter((e) => !idsToRemove.includes(e.source) && !idsToRemove.includes(e.target)));
   }, [getNodes, getEdges, setNodes, setEdges]);
 
-  // PRO: AI Suggestions (Hotfix UX)
-  const handleAiSuggest = useCallback(async (id: string, text: string) => {
-    const currentTopic = data.topics?.find(t => t.id === activeTopicId)?.name || 'General';
-    
-    // Set loading state on node
-    setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, isAiLoading: true } } : n));
-
-    try {
-      const suggestions = await suggestMindMapBranches(currentTopic, text);
-      
-      setNodes((nds) => {
-        const parentNode = nds.find(n => n.id === id);
-        if (!parentNode) return nds;
-
-        const newNodes: Node[] = [];
-        const newEdges: Edge[] = [];
-        const radius = 300;
-        const parentColor = (parentNode.data.color as string) || '#6366f1';
-
-        suggestions.forEach((word, index) => {
-          const angle = (index / suggestions.length) * 2 * Math.PI;
-          const x = parentNode.position.x + radius * Math.cos(angle);
-          const y = parentNode.position.y + radius * Math.sin(angle);
-          const childId = uuidv4();
-
-          newNodes.push({
-            id: childId,
-            type: 'mindmap',
-            data: { label: word, color: parentColor },
-            position: { x, y }
-          });
-
-          newEdges.push({
-            id: `e-${id}-${childId}`,
-            source: id,
-            target: childId,
-            type: 'smoothstep',
-            animated: true,
-            style: { stroke: parentColor, strokeWidth: 3 },
-          });
-        });
-
-        setEdges(eds => [...eds, ...newEdges]);
-        return [...nds, ...newNodes];
-      });
-    } catch (e: any) {
-      alert(e.message);
-    } finally {
-      // Hotfix: Đảm bảo TẮT loading trong mọi trường hợp (kể cả lỗi 429)
-      setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, isAiLoading: false } } : n));
-    }
-  }, [activeTopicId, data.topics, setNodes, setEdges]);
 
   // Inject functions into child nodes
   const nodesWithCallbacks = useMemo(() => {
@@ -322,11 +329,10 @@ const VocabBankCanvasContent: React.FC = () => {
             onAddChild: handleAddChild, 
             onChange: handleNodeLabelChange,
             onColorChange: handleColorChange,
-            onAiSuggest: handleAiSuggest,
             onDeleteNode: handleDeleteNode
         }
     }));
-  }, [nodes, handleAddChild, handleNodeLabelChange, handleColorChange, handleAiSuggest, handleDeleteNode]);
+  }, [nodes, handleAddChild, handleNodeLabelChange, handleColorChange, handleDeleteNode]);
 
   // AI Scanner Logic
   const handleScan = async () => {
@@ -374,7 +380,6 @@ const VocabBankCanvasContent: React.FC = () => {
     const reactFlowBounds = document.querySelector('.react-flow')?.getBoundingClientRect();
     if (!reactFlowBounds) return;
 
-    // Simple offset for demonstration
     const position = {
         x: event.clientX - reactFlowBounds.left - 75,
         y: event.clientY - reactFlowBounds.top - 25,
@@ -387,18 +392,24 @@ const VocabBankCanvasContent: React.FC = () => {
       data: { 
         label: `${word.word} (${word.ipa})\n${word.meaning}`,
         onAddChild: handleAddChild,
-        onChange: handleNodeLabelChange
+        onChange: handleNodeLabelChange,
+        onDeleteNode: handleDeleteNode,
+        onColorChange: handleColorChange
       },
     };
 
+    console.group('[VocabBankCanvas:onDrop]');
+    console.info('Dropped Word:', word);
+    console.info('Canvas Position:', position);
     setNodes((nds) => [...nds, newNode]);
     
     // Remove from inbox
     const newInbox = data.inbox.filter(w => w.id !== word.id);
     const newData = { ...data, inbox: newInbox };
     setData(newData);
-    canvasStorage.save(newData); // Save instantly for dnd
-  }, [data, handleAddChild, handleNodeLabelChange, setNodes]);
+    canvasStorage.save(newData); 
+    console.groupEnd();
+  }, [data.inbox, handleAddChild, handleNodeLabelChange, handleDeleteNode, handleColorChange, setNodes]);
 
   if (loading) {
     return (
@@ -514,8 +525,29 @@ const VocabBankCanvasContent: React.FC = () => {
             <Background color="#f1f5f9" gap={20} />
             <Controls className="!bg-white !border-slate-100 !shadow-2xl !rounded-xl overflow-hidden" />
             <Panel position="top-right" className="flex items-center gap-3">
-                <div className="bg-white/80 backdrop-blur-md p-2 rounded-2xl border border-white shadow-xl">
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-2">Mind Map Builder Pro v3.0</p>
+                <div className="bg-white/80 backdrop-blur-md p-2 rounded-2xl border border-white shadow-xl flex items-center gap-3">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-2">Mind Map Builder Cloud v4.5</p>
+                    <div className="h-4 w-[1px] bg-slate-100"></div>
+                    <div className="flex items-center gap-2 px-2">
+                        {syncStatus === 'saving' && (
+                            <>
+                                <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse"></div>
+                                <span className="text-[8px] font-black text-amber-600 uppercase">Đang lưu...</span>
+                            </>
+                        )}
+                        {syncStatus === 'saved' && (
+                            <>
+                                <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
+                                <span className="text-[8px] font-black text-emerald-600 uppercase">Đã đồng bộ</span>
+                            </>
+                        )}
+                        {syncStatus === 'error' && (
+                            <>
+                                <div className="w-2 h-2 bg-rose-500 rounded-full"></div>
+                                <span className="text-[8px] font-black text-rose-600 uppercase">Lỗi Cloud</span>
+                            </>
+                        )}
+                    </div>
                 </div>
                 <button 
                     onClick={saveAll}

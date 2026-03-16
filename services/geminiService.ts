@@ -164,32 +164,6 @@ export const extractVocabFromText = async (text: string): Promise<any[]> => {
   }
 };
 
-/**
- * Gợi ý các nhánh/từ vựng liên quan cho Mind Map
- */
-export const suggestMindMapBranches = async (topic: string, currentWord: string): Promise<string[]> => {
-  const apiKey = await getApiKey();
-  if (!apiKey) throw new Error("Chưa cấu hình API Key.");
-  
-  const ai = new GoogleGenAI({ apiKey });
-  const prompt = `Give me 4 closely related English vocabulary words for the word '${currentWord}' in the context of '${topic}'. 
-  Return ONLY a JSON array of strings: ["word1", "word2", "word3", "word4"].`;
-
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
-      contents: prompt,
-      config: { 
-        responseMimeType: "application/json",
-        temperature: 0.8 
-      }
-    });
-    
-    return JSON.parse(cleanJsonResponse(response.text));
-  } catch (error: any) {
-    handleGeminiError(error);
-  }
-};
 
 export const generateExamContent = async (config: ExamConfig): Promise<Question[]> => {
   const apiKey = await getApiKey();

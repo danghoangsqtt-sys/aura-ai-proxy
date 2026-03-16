@@ -9,7 +9,11 @@ interface Message {
   parts: { text: string; inlineData?: any }[];
 }
 
-const ChatbotPanel: React.FC = () => {
+interface ChatbotPanelProps {
+  onClose?: () => void;
+}
+
+const ChatbotPanel: React.FC<ChatbotPanelProps> = ({ onClose }) => {
   const [messages, setMessages] = useState<Message[]>([
     { 
       role: 'model', 
@@ -46,7 +50,7 @@ const ChatbotPanel: React.FC = () => {
     };
   }, []);
 
-  const getApiKey = () => localStorage.getItem('edugen_api_key') || process.env.API_KEY || "";
+  const getApiKey = () => localStorage.getItem('edugen_api_key') || (import.meta as any).env.VITE_GEMINI_API_KEY || "";
 
   // --- CAMERA LOGIC ---
   const startCamera = async () => {
@@ -280,8 +284,8 @@ const ChatbotPanel: React.FC = () => {
                 <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
               </div>
               <div className="flex justify-center items-center gap-8 mt-8">
-                <button onClick={stopCamera} className="w-14 h-14 bg-white/10 text-white rounded-full flex items-center justify-center hover:bg-white/20 transition-all"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg></button>
-                <button onClick={capturePhoto} className="w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-2xl active:scale-90 transition-all group"><div className="w-16 h-16 rounded-full border-4 border-slate-900 group-hover:bg-slate-50"></div></button>
+                <button onClick={stopCamera} className="w-14 h-14 bg-white/10 text-white rounded-full flex items-center justify-center hover:bg-white/20 transition-all" title="Đóng Camera"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg></button>
+                <button onClick={capturePhoto} className="w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-2xl active:scale-90 transition-all group" title="Chụp ảnh"><div className="w-16 h-16 rounded-full border-4 border-slate-900 group-hover:bg-slate-50"></div></button>
               </div>
             </div>
             <canvas ref={canvasRef} className="hidden" />
@@ -306,6 +310,15 @@ const ChatbotPanel: React.FC = () => {
           </div>
           <div className="flex items-center gap-3">
             <button onClick={() => handleSendMessage("Sensei ơi, mình muốn luyện phát âm!")} className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-100 transition-all">Luyện phát âm</button>
+            {onClose && (
+                <button 
+                  onClick={onClose}
+                  className="w-10 h-10 bg-slate-100 text-slate-400 hover:bg-rose-50 hover:text-rose-600 rounded-xl transition-all flex items-center justify-center"
+                  title="Thoát"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+            )}
           </div>
         </div>
 
@@ -381,10 +394,10 @@ const ChatbotPanel: React.FC = () => {
           
           <div className="flex items-end gap-3 bg-slate-50 p-2.5 rounded-[32px] border border-slate-100 focus-within:bg-white focus-within:ring-8 focus-within:ring-indigo-50/50 transition-all">
             <div className="flex items-center gap-1">
-              <button onClick={() => fileInputRef.current?.click()} className="p-4 text-slate-400 hover:text-indigo-600 rounded-2xl transition-all">
+              <button onClick={() => fileInputRef.current?.click()} className="p-4 text-slate-400 hover:text-indigo-600 rounded-2xl transition-all" title="Đính kèm ảnh">
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
               </button>
-              <button onClick={startCamera} className="p-4 text-slate-400 hover:text-indigo-600 rounded-2xl transition-all">
+              <button onClick={startCamera} className="p-4 text-slate-400 hover:text-indigo-600 rounded-2xl transition-all" title="Chụp ảnh">
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /></svg>
               </button>
               <button 
@@ -393,6 +406,7 @@ const ChatbotPanel: React.FC = () => {
                 onTouchStart={startRecording}
                 onTouchEnd={stopRecording}
                 className={`p-4 rounded-2xl transition-all ${isRecording ? 'bg-rose-500 text-white animate-pulse shadow-lg shadow-rose-200' : 'text-slate-400 hover:text-indigo-600'}`}
+                title="Giữ để nói"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
               </button>
@@ -415,6 +429,7 @@ const ChatbotPanel: React.FC = () => {
               className={`w-14 h-14 rounded-[22px] transition-all flex items-center justify-center shrink-0 ${
                 inputText.trim() || selectedImage ? 'bg-indigo-600 text-white shadow-xl hover:bg-indigo-700' : 'bg-slate-200 text-slate-400'
               }`}
+              title="Gửi tin nhắn"
             >
               <svg className="w-7 h-7 rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
             </button>

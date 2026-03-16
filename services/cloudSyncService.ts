@@ -1,78 +1,128 @@
-import { databases } from './appwriteConfig';
+import { databases, APPWRITE_DATABASE_ID, COLLECTION_MINDMAPS, COLLECTION_SETTINGS } from './appwriteConfig';
 import { ID, Query } from 'appwrite';
 
-const DATABASE_ID = import.meta.env.VITE_APPWRITE_DATABASE_ID;
-const COLLECTION_ID = import.meta.env.VITE_APPWRITE_COLLECTION_ID;
-
 /**
- * Dịch vụ đồng bộ dữ liệu người dùng với Appwrite Database
+ * Advanced Cloud Synchronization Service
+ * Handles multi-collection document sync with automatic Upsert logic.
  */
 export const cloudSyncService = {
+  
   /**
-   * Lưu hoặc cập nhật dữ liệu người dùng lên Cloud
+   * Save or Update Mindmap Data
    */
-  async syncDataToCloud(userId: string, data: any) {
-    if (!DATABASE_ID || !COLLECTION_ID) {
-      console.warn('[CloudSync] -> [Warning]: Database/Collection IDs not configured.');
-      return;
-    }
-
-    console.info(`[CloudSync] -> [Action]: Syncing data for user: ${userId}`);
-
+  async saveMindmapData(userId: string, data: any) {
+    console.group(`[Appwrite:CloudSync] -> [SaveMindmap] -> User: ${userId}`);
     try {
-      // Tìm xem user đã có record chưa
-      const response = await databases.listDocuments(
-        DATABASE_ID,
-        COLLECTION_ID,
+      if (!APPWRITE_DATABASE_ID) throw new Error("Database ID not configured");
+
+      // Check for existing document
+      const result = await databases.listDocuments(
+        APPWRITE_DATABASE_ID,
+        COLLECTION_MINDMAPS,
         [Query.equal('userId', userId)]
       );
 
-      if (response.documents.length > 0) {
-        // Cập nhật
-        const documentId = response.documents[0].$id;
+      if (result.documents.length > 0) {
+        // Update existing
+        const docId = result.documents[0].$id;
         await databases.updateDocument(
-          DATABASE_ID,
-          COLLECTION_ID,
-          documentId,
-          { data: JSON.stringify(data), lastSync: new Date().toISOString() }
+          APPWRITE_DATABASE_ID,
+          COLLECTION_MINDMAPS,
+          docId,
+          { 
+            data: JSON.stringify(data), 
+            updatedAt: new Date().toISOString() 
+          }
         );
+        console.info('[Appwrite] -> [Update] -> Success');
       } else {
-        // Tạo mới
+        // Create new
         await databases.createDocument(
-          DATABASE_ID,
-          COLLECTION_ID,
+          APPWRITE_DATABASE_ID,
+          COLLECTION_MINDMAPS,
           ID.unique(),
-          { userId, data: JSON.stringify(data), lastSync: new Date().toISOString() }
+          { 
+            userId, 
+            data: JSON.stringify(data), 
+            createdAt: new Date().toISOString() 
+          }
         );
+        console.info('[Appwrite] -> [Create] -> Success');
       }
-      console.info('[CloudSync] -> [Success]: Data synced with Appwrite Database.');
     } catch (error: any) {
-      console.error('[CloudSync] -> [ERROR]: Failed to sync with Appwrite Database:', error.message);
-      // Không ném lỗi ra ngoài để app vẫn chạy bằng LocalStorage
+      console.error('[Appwrite] -> [ERROR]:', error.message);
+      throw error;
+    } finally {
+      console.groupEnd();
     }
   },
 
   /**
-   * Lấy dữ liệu từ Cloud về
+   * Load Mindmap Data from Cloud
    */
-  async fetchDataFromCloud(userId: string) {
-    if (!DATABASE_ID || !COLLECTION_ID) return null;
-
+  async loadMindmapData(userId: string) {
+    console.info(`[Appwrite:CloudSync] -> [LoadMindmap] -> User: ${userId}`);
     try {
-      const response = await databases.listDocuments(
-        DATABASE_ID,
-        COLLECTION_ID,
+      if (!APPWRITE_DATABASE_ID) return null;
+      const result = await databases.listDocuments(
+        APPWRITE_DATABASE_ID,
+        COLLECTION_MINDMAPS,
         [Query.equal('userId', userId)]
       );
 
-      if (response.documents.length > 0) {
-        const cloudDataStr = response.documents[0].data;
-        return JSON.parse(cloudDataStr);
+      if (result.documents.length > 0) {
+        return JSON.parse(result.documents[0].data);
       }
       return null;
     } catch (error: any) {
-      console.error('[CloudSync] -> [ERROR]: Failed to fetch from Cloud:', error.message);
+      console.error('[Appwrite] -> [LoadERROR]:', error.message);
       return null;
     }
+  },
+
+  /**
+   * Save User Settings (Theme, Voice, etc)
+   */
+  async saveUserSettings(userId: string, settings: any) {
+    console.group(`[Appwrite:CloudSync] -> [SaveSettings] -> User: ${userId}`);
+    try {
+      const result = await databases.listDocuments(
+        APPWRITE_DATABASE_ID,
+        COLLECTION_SETTINGS,
+        [Query.equal('userId', userId)]
+      );
+
+      if (result.documents.length > 0) {
+        await databases.updateDocument(
+          APPWRITE_DATABASE_ID,
+          COLLECTION_SETTINGS,
+          result.documents[0].$id,
+          { settings: JSON.stringify(settings) }
+        );
+      } else {
+        await databases.createDocument(
+          APPWRITE_DATABASE_ID,
+          COLLECTION_SETTINGS,
+          ID.unique(),
+          { userId, settings: JSON.stringify(settings) }
+        );
+      }
+      console.info('[Appwrite] -> [SettingsSync] -> Success');
+    } catch (error: any) {
+      console.error('[Appwrite] -> [SettingsERROR]:', error.message);
+    } finally {
+      console.groupEnd();
+    }
+  },
+
+  /**
+   * BACKWARDS COMPATIBILITY: Sync generic data (Exams, etc)
+   */
+  async syncDataToCloud(userId: string, data: any) {
+    return this.saveMindmapData(userId, data);
+  },
+
+  async fetchDataFromCloud(userId: string) {
+    return this.loadMindmapData(userId);
   }
 };

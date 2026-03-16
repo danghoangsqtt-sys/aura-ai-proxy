@@ -20,4 +20,10 @@ export const account = new Account(client);
 export const databases = new Databases(client);
 export const storage = new Storage(client);
 
+// Collections Configuration
+export const APPWRITE_DATABASE_ID = import.meta.env.VITE_APPWRITE_DATABASE_ID || '';
+export const COLLECTION_MINDMAPS = 'mindmaps'; // Ensure this matches your Appwrite console
+export const COLLECTION_SETTINGS = 'settings';
+export const COLLECTION_USERDATA = import.meta.env.VITE_APPWRITE_COLLECTION_ID || 'userdata';
+
 export default client;

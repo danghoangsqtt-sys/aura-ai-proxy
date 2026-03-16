@@ -16,10 +16,11 @@ import FloatingAura from './components/FloatingAura';
 import MacaronicStory from './components/MacaronicStory';
 import IPAMaster from './components/IPA/IPAMaster';
 import GearSidebar from './components/GearSidebar';
+import WritingMaster from './components/Writing/WritingMaster';
 import { authService } from './services/authService';
 import { cloudSyncService } from './services/cloudSyncService';
 import AuthModal from './components/Auth/AuthModal';
-import WritingMaster from './components/Writing/WritingMaster';
+import { useAuraStore } from './store/useAuraStore';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'create' | 'library' | 'game' | 'chatbot' | 'settings' | 'dictionary' | 'speaking' | 'story' | 'ipa' | 'writing'>('create');
@@ -30,6 +31,9 @@ const App: React.FC = () => {
   const [showPrintMenu, setShowPrintMenu] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const [isCinematicSpeaking, setIsCinematicSpeaking] = useState(false);
+  
+  const { currentMode, setCurrentMode, isLiveVoice } = useAuraStore();
 
   const currentExam = currentExamIndex >= 0 ? examList[currentExamIndex] : null;
 
@@ -58,6 +62,21 @@ const App: React.FC = () => {
       }
     };
     initApp();
+
+    // Event Listeners for Aura Radial Menu
+    const handleOpenTutor = () => setCurrentMode('tutor');
+    const handleOpenSpeaking = () => {
+        setCurrentMode('speaking_room');
+        setIsCinematicSpeaking(true);
+    };
+
+    window.addEventListener('OPEN_TUTOR_MODAL', handleOpenTutor);
+    window.addEventListener('OPEN_SPEAKING_MODE', handleOpenSpeaking);
+
+    return () => {
+        window.removeEventListener('OPEN_TUTOR_MODAL', handleOpenTutor);
+        window.removeEventListener('OPEN_SPEAKING_MODE', handleOpenSpeaking);
+    };
   }, []);
 
   const handleAuthSuccess = async (user: any) => {
@@ -196,28 +215,53 @@ const App: React.FC = () => {
         }} />
 
         <main className="main-workspace" style={{ marginLeft: 0 }}>
-          {activeTab === 'create' && (
-            <div className="flex h-full animate-content">
-              <aside className="w-[320px] border-r bg-white p-4 overflow-y-auto no-print flex flex-col">
-                <ConfigPanel onGenerate={handleGenerate} isGenerating={isGenerating} />
-              </aside>
-              <div className="flex-1 flex flex-col items-center justify-center grayscale opacity-10 p-10 text-center">
-                <svg className="w-24 h-24 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                <h2 className="text-2xl font-black uppercase tracking-[12px]">Thiết lập đề thi</h2>
-                <p className="text-xs font-bold mt-2 tracking-widest">SỬ DỤNG BẢNG CẤU HÌNH BÊN TRÁI</p>
-              </div>
-            </div>
-          )}
+          {isLiveVoice && currentMode === 'dashboard' ? (
+             <div className="h-full flex flex-col items-center justify-center bg-slate-50/30">
+                <div className="text-center animate-pulse">
+                   <div className="w-20 h-20 bg-indigo-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-2xl shadow-indigo-200">
+                      <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+                   </div>
+                   <h2 className="text-xl font-black text-slate-800 uppercase tracking-[8px]">Aura đang lắng nghe...</h2>
+                   <p className="text-[10px] font-bold text-slate-400 mt-2 tracking-widest uppercase">Hãy nói điều gì đó với Aura</p>
+                </div>
+             </div>
+          ) : currentMode === 'dashboard' ? (
+            <>
+              {activeTab === 'create' && (
+                <div className="flex h-full animate-content">
+                  <aside className="w-[320px] border-r bg-white p-4 overflow-y-auto no-print flex flex-col">
+                    <ConfigPanel onGenerate={handleGenerate} isGenerating={isGenerating} />
+                  </aside>
+                  <div className="flex-1 flex flex-col items-center justify-center grayscale opacity-10 p-10 text-center">
+                    <svg className="w-24 h-24 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                    <h2 className="text-2xl font-black uppercase tracking-[12px]">Thiết lập đề thi</h2>
+                    <p className="text-xs font-bold mt-2 tracking-widest">SỬ DỤNG BẢNG CẤU HÌNH BÊN TRÁI</p>
+                  </div>
+                </div>
+              )}
 
-          {activeTab === 'library' && !currentExam && <LibraryPanel exams={examList} onSelect={(id) => setCurrentExamIndex(examList.findIndex(e => e.id === id))} onDelete={deleteExam} />}
-          {activeTab === 'story' && <MacaronicStory />}
-          {activeTab === 'speaking' && <div className="h-full animate-content"><SpeakingArena /></div>}
-          {activeTab === 'ipa' && <IPAMaster />}
-          {activeTab === 'writing' && <div className="h-full animate-content"><WritingMaster /></div>}
-          {activeTab === 'dictionary' && <div className="h-full p-6 animate-content"><DictionaryPanel /></div>}
-          {activeTab === 'chatbot' && <div className="h-full animate-content"><ChatbotPanel /></div>}
-          {activeTab === 'game' && <div className="h-full animate-content"><GameCenter initialQuestions={currentExam?.questions || []} initialExamTitle={currentExam?.config.title || ""} examList={examList} /></div>}
-          {activeTab === 'settings' && <div className="h-full animate-content"><SettingsPanel /></div>}
+              {activeTab === 'library' && !currentExam && <LibraryPanel exams={examList} onSelect={(id) => setCurrentExamIndex(examList.findIndex(e => e.id === id))} onDelete={deleteExam} />}
+              {activeTab === 'story' && <MacaronicStory />}
+              {activeTab === 'speaking' && <div className="h-full animate-content"><SpeakingArena /></div>}
+              {activeTab === 'ipa' && <IPAMaster />}
+              {activeTab === 'writing' && <div className="h-full animate-content"><WritingMaster /></div>}
+              {activeTab === 'dictionary' && <div className="h-full p-6 animate-content"><DictionaryPanel /></div>}
+              {/* ChatbotPanel is strictly forbidden in dashboard tabs - only allowed in tutor mode */}
+              {activeTab === 'game' && <div className="h-full animate-content"><GameCenter initialQuestions={currentExam?.questions || []} initialExamTitle={currentExam?.config.title || ""} examList={examList} /></div>}
+              {activeTab === 'settings' && <div className="h-full animate-content"><SettingsPanel /></div>}
+            </>
+          ) : currentMode === 'tutor' && !isLiveVoice ? (
+             <div className="h-full animate-in slide-in-from-right duration-500">
+                <ChatbotPanel onClose={() => setCurrentMode('dashboard')} />
+             </div>
+          ) : currentMode === 'speaking_room' ? (
+             <div className="h-full animate-in zoom-in-95 duration-700">
+                <SpeakingArena onExit={() => {
+                    setCurrentMode('dashboard');
+                    setIsCinematicSpeaking(false);
+                }} />
+             </div>
+          ) : null}
 
           {isGenerating && (
             <div className="fixed inset-0 z-[100] bg-white/80 backdrop-blur-md flex flex-col items-center justify-center">
@@ -251,7 +295,10 @@ const App: React.FC = () => {
           )}
         </main>
       </div>
-      <FloatingAura />
+      <FloatingAura 
+        isCinematic={isCinematicSpeaking} 
+        onExitCinematic={() => setIsCinematicSpeaking(false)} 
+      />
     </div>
   );
 };
