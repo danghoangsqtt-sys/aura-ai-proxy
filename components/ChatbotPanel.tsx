@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI, Modality } from "@google/genai";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { OllamaService, ChatMessage } from '../services/ollamaService';
 
 interface Message {
   role: 'user' | 'model';
@@ -246,18 +247,23 @@ const ChatbotPanel: React.FC<ChatbotPanelProps> = ({ onClose }) => {
     setIsTyping(true);
 
     try {
-      const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: updatedMessages.slice(-10),
-        config: {
-          systemInstruction: "BẠN LÀ: EduGen Master Sensei - Gia sư AI bậc thầy. Phải phân tích chuyên sâu, dạy cách câu cá, hài hước và dùng Markdown. Nếu người dùng hỏi về từ vựng, hãy cung cấp IPA và nghĩa.",
-          temperature: 0.9,
-        }
-      });
-      setMessages(prev => [...prev, { role: 'model', parts: [{ text: response.text || "" }] }]);
+      // Chuyển đổi lịch sử chat sang định dạng của Ollama
+      const history: ChatMessage[] = messages.map(msg => ({
+        role: msg.role === 'user' ? 'user' : 'assistant',
+        content: msg.parts.map(p => p.text || "").join("\n")
+      }));
+
+      const responseText = await OllamaService.sendChatMessage(history, textToSubmit);
+      
+      setMessages(prev => [...prev, { 
+        role: 'model', 
+        parts: [{ text: responseText }] 
+      }]);
     } catch (err: any) {
-      setMessages(prev => [...prev, { role: 'model', parts: [{ text: "Opps! Có vẻ như đường truyền kiến thức bị nhiễu." }] }]);
+      setMessages(prev => [...prev, { 
+        role: 'model', 
+        parts: [{ text: `Lỗi: ${err.message || "Opps! Có vẻ như đường truyền kiến thức bị nhiễu."}` }] 
+      }]);
     } finally {
       setIsTyping(false);
     }

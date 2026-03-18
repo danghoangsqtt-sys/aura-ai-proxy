@@ -8,7 +8,7 @@ export default defineConfig({
   define: {
     'global': 'window',
   },
-  base: '/',
+  base: './',
   resolve: {
     alias: {
       'pixi.js': 'pixi.js',

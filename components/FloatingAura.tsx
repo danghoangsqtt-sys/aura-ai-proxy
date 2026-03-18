@@ -121,8 +121,8 @@ const FloatingAura: React.FC<FloatingAuraProps> = ({ isCinematic, onExitCinemati
         </button>
       )}
 
-      {/* Transcript Overlay */}
-      {isLiveChatOpen && (
+      {/* Transcript Overlay - Disabled during Live Voice for clean UI as requested */}
+      {isLiveChatOpen && !isLiveVoice && (
         <AuraLiveChat 
             messages={messages} 
             isAuraSpeaking={isSpeaking}

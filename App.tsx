@@ -17,9 +17,6 @@ import MacaronicStory from './components/MacaronicStory';
 import IPAMaster from './components/IPA/IPAMaster';
 import GearSidebar from './components/GearSidebar';
 import WritingMaster from './components/Writing/WritingMaster';
-import { authService } from './services/authService';
-import { cloudSyncService } from './services/cloudSyncService';
-import AuthModal from './components/Auth/AuthModal';
 import { useAuraStore } from './store/useAuraStore';
 
 const App: React.FC = () => {
@@ -29,8 +26,6 @@ const App: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [viewMode, setViewMode] = useState<'exam' | 'answer' | 'both'>('exam');
   const [showPrintMenu, setShowPrintMenu] = useState(false);
-  const [currentUser, setCurrentUser] = useState<any>(null);
-  const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [isCinematicSpeaking, setIsCinematicSpeaking] = useState(false);
   
   const { currentMode, setCurrentMode, isLiveVoice } = useAuraStore();
@@ -39,26 +34,12 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const initApp = async () => {
-      console.info('[App] -> [Action]: Checking user session...');
-      setIsAuthChecking(true);
+      console.info('[App] -> [Action]: Initializing App (Local Mode)...');
       try {
-        const user = await authService.getCurrentUser();
-        if (user) {
-          setCurrentUser(user);
-          // Đồng bộ dữ liệu từ Cloud khi login thành công
-          const cloudData = await cloudSyncService.fetchDataFromCloud(user.$id);
-          if (cloudData && cloudData.exams) {
-            setExamList(cloudData.exams);
-          } else {
-            // Nếu cloud chưa có, dùng local tạm
-            const savedExams = await storage.get<ExamPaperType[]>(STORAGE_KEYS.EXAMS, []);
-            setExamList(savedExams);
-          }
-        }
+        const savedExams = await storage.get<ExamPaperType[]>(STORAGE_KEYS.EXAMS, []);
+        setExamList(savedExams);
       } catch (err) {
-        console.error('[App] -> [ERROR]: Session check failed:', err);
-      } finally {
-        setIsAuthChecking(false);
+        console.error('[App] -> [ERROR]: Failed to load local data:', err);
       }
     };
     initApp();
@@ -79,26 +60,6 @@ const App: React.FC = () => {
     };
   }, []);
 
-  const handleAuthSuccess = async (user: any) => {
-    setCurrentUser(user);
-    // Kéo data cloud sau khi login
-    const cloudData = await cloudSyncService.fetchDataFromCloud(user.$id);
-    if (cloudData && cloudData.exams) {
-      setExamList(cloudData.exams);
-    }
-  };
-
-  const handleLogout = async () => {
-    if (!window.confirm("Bạn có chắc muốn đăng xuất?")) return;
-    try {
-      await authService.logout();
-      setCurrentUser(null);
-      setExamList([]);
-    } catch (err) {
-      console.error("Logout error:", err);
-    }
-  };
-
   const handleGenerate = async (config: ExamConfig) => {
     setIsGenerating(true);
     try {
@@ -115,11 +76,6 @@ const App: React.FC = () => {
       
       // LƯU XUỐNG Ổ CỨNG
       await storage.set(STORAGE_KEYS.EXAMS, newList);
-      
-      // ĐỒNG BỘ LÊN CLOUD
-      if (currentUser) {
-        await cloudSyncService.syncDataToCloud(currentUser.$id, { exams: newList });
-      }
       
       setCurrentExamIndex(0);
       setActiveTab('library');
@@ -141,9 +97,6 @@ const App: React.FC = () => {
     
     setExamList(updatedExamList);
     await storage.set(STORAGE_KEYS.EXAMS, updatedExamList);
-    if (currentUser) {
-      await cloudSyncService.syncDataToCloud(currentUser.$id, { exams: updatedExamList });
-    }
   };
 
   const deleteExam = async (id: string) => {
@@ -151,10 +104,6 @@ const App: React.FC = () => {
     const newList = examList.filter(e => e.id !== id);
     setExamList(newList);
     await storage.set(STORAGE_KEYS.EXAMS, newList);
-    
-    if (currentUser) {
-      await cloudSyncService.syncDataToCloud(currentUser.$id, { exams: newList });
-    }
     
     if (currentExam?.id === id) setCurrentExamIndex(-1);
   };
@@ -167,19 +116,6 @@ const App: React.FC = () => {
 
   // Skip desktop update checks and window controls as we migrated to web
 
-  if (isAuthChecking) {
-    return (
-      <div className="fixed inset-0 bg-white flex flex-col items-center justify-center">
-        <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Đang khởi tạo...</p>
-      </div>
-    );
-  }
-
-  if (!currentUser) {
-    return <AuthModal onSuccess={handleAuthSuccess} />;
-  }
-
   return (
     <div className="desktop-window">
       <div className="h-14 bg-white border-b px-6 flex items-center justify-between no-print">
@@ -188,22 +124,6 @@ const App: React.FC = () => {
              <span className="text-[10px] text-white font-black italic">A</span>
            </div>
            <span className="text-xs font-black text-slate-800 uppercase tracking-[3px]">Aura Edu Studio</span>
-        </div>
-        
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-3 px-4 py-2 bg-slate-50 rounded-2xl border border-slate-100">
-            <div className="w-6 h-6 bg-indigo-100 rounded-full flex items-center justify-center text-[10px] font-black text-indigo-600">
-              {currentUser.name.charAt(0)}
-            </div>
-            <span className="text-[11px] font-black text-slate-700">{currentUser.name}</span>
-          </div>
-          <button 
-            onClick={handleLogout}
-            className="p-2.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
-            title="Đăng xuất"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-          </button>
         </div>
       </div>
 
@@ -215,7 +135,7 @@ const App: React.FC = () => {
         }} />
 
         <main className="main-workspace" style={{ marginLeft: 0 }}>
-          {isLiveVoice && currentMode === 'dashboard' ? (
+          {isLiveVoice ? (
              <div className="h-full flex flex-col items-center justify-center bg-slate-50/30">
                 <div className="text-center animate-pulse">
                    <div className="w-20 h-20 bg-indigo-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-2xl shadow-indigo-200">
@@ -246,11 +166,10 @@ const App: React.FC = () => {
               {activeTab === 'ipa' && <IPAMaster />}
               {activeTab === 'writing' && <div className="h-full animate-content"><WritingMaster /></div>}
               {activeTab === 'dictionary' && <div className="h-full p-6 animate-content"><DictionaryPanel /></div>}
-              {/* ChatbotPanel is strictly forbidden in dashboard tabs - only allowed in tutor mode */}
               {activeTab === 'game' && <div className="h-full animate-content"><GameCenter initialQuestions={currentExam?.questions || []} initialExamTitle={currentExam?.config.title || ""} examList={examList} /></div>}
               {activeTab === 'settings' && <div className="h-full animate-content"><SettingsPanel /></div>}
             </>
-          ) : currentMode === 'tutor' && !isLiveVoice ? (
+          ) : currentMode === 'tutor' ? (
              <div className="h-full animate-in slide-in-from-right duration-500">
                 <ChatbotPanel onClose={() => setCurrentMode('dashboard')} />
              </div>

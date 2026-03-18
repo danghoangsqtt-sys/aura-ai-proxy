@@ -130,6 +130,13 @@ const GearSidebar: React.FC<GearSidebarProps> = ({ activeTab, onTabChange }) => 
           <circle cx="12" cy="12" r="3" />
         </svg>
       </button>
+
+      {/* App Version */}
+      <div className="fixed left-4 bottom-4 z-[50] no-print">
+        <span className="text-[10px] font-black text-slate-400 uppercase tracking-[4px] opacity-50">
+          Aura Local AI v1.0
+        </span>
+      </div>
     </div>
     </>
   );

@@ -21,8 +21,11 @@ export class LiveService {
     this.ws.onopen = () => {
       console.info('[LiveService] -> [Action]: WebSocket opened. Sending Setup Message...');
       this.sendSetupMessage();
-      // REMOVED: if (this.onConnected) this.onConnected(); 
-      // We must wait for setupComplete from the server.
+      
+      // Ép Aura phát âm thanh chào người dùng ngay khi kết nối
+      setTimeout(() => {
+          this.sendText("Hãy đóng vai là Aura. Hãy nói đúng một câu ngắn gọn bằng tiếng Việt: 'Xin chào, mình là Aura, bạn muốn trao đổi gì hôm nay?' và chờ tôi trả lời.");
+      }, 1000);
     };
 
     this.ws.onmessage = (event) => {
@@ -73,12 +76,17 @@ export class LiveService {
   private sendSetupMessage() {
     const setupMsg = {
       setup: {
-        model: "models/gemini-2.0-flash-exp",
+        // Sử dụng model mới nhất hỗ trợ BidiGenerateContent (safest fallback)
+        model: "models/gemini-2.0-flash-exp", 
         generationConfig: {
-            responseModalities: ["AUDIO"],
-            speechConfig: {
-                voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } }
+          responseModalities: ["AUDIO"], // BẮT BUỘC PHẢI CÓ ĐỂ KHÔNG BỊ NGẮT WS
+          speechConfig: {
+            voiceConfig: { 
+              prebuiltVoiceConfig: { 
+                voiceName: "Aoede" // Giọng nữ chuẩn của Google
+              } 
             }
+          }
         },
         systemInstruction: {
           parts: [{
@@ -89,21 +97,6 @@ export class LiveService {
     };
     console.info('[LiveService] -> [Action]: Sending Setup Payload:', JSON.stringify(setupMsg));
     this.send(setupMsg);
-
-    // Auto-greeting: Send a user turn to prompt Aura to greet the user
-    setTimeout(() => {
-        console.info('[LiveService] -> [Action]: Sending Auto-Greeting prompt...');
-        const greetingMsg = {
-            clientContent: {
-                turns: [{ 
-                    role: "user", 
-                    parts: [{ text: "Hãy đóng vai là Aura. Hãy nói đúng một câu ngắn gọn bằng tiếng Việt: 'Xin chào, mình là Aura, bạn muốn trao đổi gì hôm nay?' và chờ tôi trả lời." }] 
-                }],
-                turnComplete: true
-            }
-        };
-        this.send(greetingMsg);
-    }, 1000);
   }
 
   sendAudio(base64Pcm: string) {
