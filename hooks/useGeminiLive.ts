@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { LiveService } from '../services/liveService';
 import { AudioRecorder, AudioPlayer } from '../utils/audioUtils';
+import { AIConfigService } from '../services/aiConfigService';
 
 export interface ChatMessage {
     id: string;
@@ -26,12 +27,15 @@ export const useGeminiLive = () => {
   }, []);
 
   const connect = async (instruction?: string) => {
-    const apiKey = localStorage.getItem('edugen_api_key') || (import.meta as any).env.VITE_GEMINI_API_KEY;
+    // Primary: AIConfigService (Settings panel)
+    // Fallback: legacy key + env variable
+    const apiKey = AIConfigService.getGeminiApiKey()
+      || localStorage.getItem('edugen_api_key')
+      || (import.meta as any).env.VITE_GEMINI_API_KEY;
     
     if (!apiKey || apiKey === 'your_actual_api_key_here') {
         console.error("[useGeminiLive] -> [Auth Error]: Missing or invalid API Key.");
-        alert("Vui lòng cấu hình Gemini API Key chính xác trong phần Cài đặt để sử dụng tính năng Voice!");
-        return;
+        throw new Error("Vui lòng cấu hình Gemini API Key trong phần Cài đặt.");
     }
 
     console.info('[useGeminiLive] -> [Auth]: API Key resolved successfully.');
