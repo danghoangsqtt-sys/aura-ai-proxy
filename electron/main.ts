@@ -1,14 +1,41 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell } from 'electron';
 import * as fs from 'fs';
 import * as si from 'systeminformation';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { spawn, exec, execFile } from 'child_process';
 import * as https from 'https';
 import * as os from 'os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// ===== LIBRARY FILE EXPLORER =====
+// Use a folder next to the app for easy access (not hidden in AppData)
+// Use a folder next to the app for easy access (not hidden in AppData)
+const LIBRARY_ROOT = !app.isPackaged
+  ? path.join(path.dirname(__dirname), 'AuraGen_Library')   // Dev: project root
+  : path.join(path.dirname(app.getPath('exe')), 'AuraGen_Library'); // Prod: next to .exe
+// Ensure root folder exists on startup
+if (!fs.existsSync(LIBRARY_ROOT)) {
+  fs.mkdirSync(LIBRARY_ROOT, { recursive: true });
+  console.log('[Electron] Created Library root:', LIBRARY_ROOT);
+}
+
+// Supported file extensions for the library
+const SUPPORTED_EXTENSIONS = new Set(['.pdf', '.mp4', '.webm', '.mov', '.avi', '.mkv', '.docx', '.pptx', '.txt', '.jpg', '.jpeg', '.png', '.gif', '.webp']);
+
+/**
+ * Security: prevent path traversal (e.g. ../../Windows/System32)
+ * Returns the absolute path if safe, throws if not.
+ */
+function safePath(relativePath: string): string {
+  const absolute = path.resolve(LIBRARY_ROOT, relativePath);
+  if (!absolute.startsWith(LIBRARY_ROOT)) {
+    throw new Error('Access Denied: path traversal detected');
+  }
+  return absolute;
+}
 
 let mainWindow: BrowserWindow | null = null;
 let pythonProcess: any = null;
@@ -184,7 +211,7 @@ function createWindow() {
       const filePath = path.join(auraDataFolder, `${fileName}.json`);
       fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
       return { success: true };
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving local data:', err);
       return { success: false, error: err.message };
     }
@@ -415,6 +442,213 @@ function createWindow() {
     }
   });
 
+  // ===== DOCUMENT FILE STORAGE (Physical FS) =====
+  const getDocumentsFolder = (): string => {
+    const folder = path.join(app.getPath('userData'), 'AuraData', 'Documents');
+    if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
+    return folder;
+  };
+
+  // Save a document file to the physical filesystem
+  ipcMain.handle('save-document-file', async (_event, fileName: string, buffer: ArrayBuffer) => {
+    try {
+      const folder = getDocumentsFolder();
+      // Ensure unique filename to avoid collisions
+      const safeName = `${Date.now()}_${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+      const filePath = path.join(folder, safeName);
+      fs.writeFileSync(filePath, Buffer.from(buffer));
+      console.log(`[Electron] Document saved: ${filePath}`);
+      return { success: true, path: filePath };
+    } catch (err: any) {
+      console.error('[Electron] Error saving document file:', err);
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Read a document file from the physical filesystem
+  ipcMain.handle('read-document-file', async (_event, filePath: string) => {
+    try {
+      if (!fs.existsSync(filePath)) return { success: false, error: 'File not found' };
+      const buffer = fs.readFileSync(filePath);
+      return { success: true, buffer: buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) };
+    } catch (err: any) {
+      console.error('[Electron] Error reading document file:', err);
+      return { success: false, error: err.message };
+    }
+  });
+
+  // ===== FILESYSTEM CRUD (Create/Rename/Delete) =====
+  ipcMain.handle('create-folder', async (_event, folderPath: string) => {
+    try {
+      await fs.promises.mkdir(folderPath, { recursive: true });
+      console.log(`[Electron] Folder created: ${folderPath}`);
+      return { success: true };
+    } catch (err: any) {
+      console.error('[Electron] Error creating folder:', err);
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('rename-item', async (_event, oldPath: string, newPath: string) => {
+    try {
+      await fs.promises.rename(oldPath, newPath);
+      console.log(`[Electron] Renamed: ${oldPath} -> ${newPath}`);
+      return { success: true };
+    } catch (err: any) {
+      console.error('[Electron] Error renaming item:', err);
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('delete-item', async (_event, itemPath: string) => {
+    try {
+      // Safety check: only allow deletion within AuraData
+      const auraDataRoot = path.join(app.getPath('userData'), 'AuraData');
+      const resolved = path.resolve(itemPath);
+      if (!resolved.startsWith(auraDataRoot)) {
+        return { success: false, error: 'Deletion is restricted to AuraData directory for safety.' };
+      }
+      await fs.promises.rm(resolved, { recursive: true, force: true });
+      console.log(`[Electron] Deleted: ${resolved}`);
+      return { success: true };
+    } catch (err: any) {
+      console.error('[Electron] Error deleting item:', err);
+      return { success: false, error: err.message };
+    }
+  });
+
+  // ===== LIBRARY FILE EXPLORER IPC =====
+
+  // Get the library root path
+  ipcMain.handle('get-library-root', () => LIBRARY_ROOT);
+
+  // Read directory contents (files & folders)
+  ipcMain.handle('read-library-dir', async (_event, relativePath: string = '') => {
+    try {
+      const dirPath = safePath(relativePath);
+      const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+      const items = [];
+
+      for (const entry of entries) {
+        const fullPath = path.join(dirPath, entry.name);
+        const relPath = path.relative(LIBRARY_ROOT, fullPath);
+
+        if (entry.isDirectory()) {
+          items.push({
+            name: entry.name,
+            isDirectory: true,
+            path: relPath,
+            size: 0,
+            extension: '',
+          });
+        } else {
+          const ext = path.extname(entry.name).toLowerCase();
+          if (SUPPORTED_EXTENSIONS.has(ext)) {
+            const stat = await fs.promises.stat(fullPath);
+            items.push({
+              name: entry.name,
+              isDirectory: false,
+              path: relPath,
+              size: stat.size,
+              extension: ext,
+            });
+          }
+        }
+      }
+
+      // Folders first, then files sorted by name
+      items.sort((a, b) => {
+        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      return { success: true, items };
+    } catch (err: any) {
+      console.error('[Library] read-library-dir error:', err);
+      return { success: false, error: err.message, items: [] };
+    }
+  });
+
+  // Create a new folder
+  ipcMain.handle('create-library-folder', async (_event, parentRelPath: string, folderName: string) => {
+    try {
+      const parentPath = safePath(parentRelPath);
+      const newFolderPath = path.join(parentPath, folderName);
+      // Verify the new path is still within LIBRARY_ROOT
+      if (!newFolderPath.startsWith(LIBRARY_ROOT)) {
+        return { success: false, error: 'Access Denied' };
+      }
+      await fs.promises.mkdir(newFolderPath, { recursive: true });
+      console.log('[Library] Folder created:', newFolderPath);
+      return { success: true };
+    } catch (err: any) {
+      console.error('[Library] create-library-folder error:', err);
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Rename a file or folder
+  ipcMain.handle('rename-library-item', async (_event, relPath: string, newName: string) => {
+    try {
+      const oldPath = safePath(relPath);
+      const newPath = path.join(path.dirname(oldPath), newName);
+      // Verify new path stays within LIBRARY_ROOT
+      if (!newPath.startsWith(LIBRARY_ROOT)) {
+        return { success: false, error: 'Access Denied' };
+      }
+      await fs.promises.rename(oldPath, newPath);
+      console.log('[Library] Renamed:', oldPath, '->', newPath);
+      return { success: true, newRelPath: path.relative(LIBRARY_ROOT, newPath) };
+    } catch (err: any) {
+      console.error('[Library] rename-library-item error:', err);
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Delete a file or folder (moves to Recycle Bin / Trash)
+  ipcMain.handle('delete-library-item', async (_event, relPath: string) => {
+    try {
+      const absPath = safePath(relPath);
+      // Use shell.trashItem for safe deletion (Recycle Bin)
+      await shell.trashItem(absPath);
+      console.log('[Library] Trashed:', absPath);
+      return { success: true };
+    } catch (err: any) {
+      console.error('[Library] delete-library-item error:', err);
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Open folder in OS file explorer (Windows Explorer / Finder)
+  ipcMain.handle('open-in-os-explorer', async (_event, relPath: string = '') => {
+    try {
+      const absPath = safePath(relPath);
+      await shell.openPath(absPath);
+      return { success: true };
+    } catch (err: any) {
+      console.error('[Library] open-in-os-explorer error:', err);
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Open any file with the system's default application (PowerPoint, Adobe Reader, etc.)
+  ipcMain.handle('open-file-native', async (_event, absolutePath: string) => {
+    try {
+      if (!absolutePath || !fs.existsSync(absolutePath)) {
+        return { success: false, error: 'File not found' };
+      }
+      const errorMsg = await shell.openPath(absolutePath);
+      if (errorMsg) {
+        return { success: false, error: errorMsg };
+      }
+      console.log('[Electron] Opened natively:', absolutePath);
+      return { success: true };
+    } catch (err: any) {
+      console.error('[Electron] open-file-native error:', err);
+      return { success: false, error: err.message };
+    }
+  });
+
   // 5. Trigger khởi động Backend từ Frontend
   ipcMain.on('frontend-ready', () => {
       console.log('[Electron] Frontend is ready and listening. Starting Python...');
@@ -422,10 +656,79 @@ function createWindow() {
   });
 }
 
-app.on('ready', () => {
+app.whenReady().then(() => {
+  // Register custom protocol for serving local files to the renderer
+  // Supports Range requests (HTTP 206) for video seeking/streaming
+  protocol.handle('local-file', async (request) => {
+    // Strip protocol prefix (handles both // and /// variants)
+    let filePath = request.url.replace(/^local-file:\/{2,3}/, '');
+    filePath = decodeURIComponent(filePath);
+
+    // Fix Windows: Chromium strips the colon from drive letters (C/ -> C:/)
+    if (process.platform === 'win32' && /^[a-zA-Z]\//.test(filePath)) {
+      filePath = filePath.replace(/^([a-zA-Z])\//, '$1:/');
+    }
+
+    const decodedPath = filePath;
+
+    try {
+      const stat = fs.statSync(decodedPath);
+      const fileSize = stat.size;
+
+      // Determine MIME type from extension
+      const ext = path.extname(decodedPath).toLowerCase();
+      const mimeTypes: Record<string, string> = {
+        '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
+        '.avi': 'video/x-msvideo', '.mkv': 'video/x-matroska',
+        '.pdf': 'application/pdf',
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+        '.gif': 'image/gif', '.webp': 'image/webp',
+      };
+      const contentType = mimeTypes[ext] || 'application/octet-stream';
+
+      // Handle Range requests (needed for video seeking)
+      const rangeHeader = request.headers.get('range');
+      if (rangeHeader) {
+        const parts = rangeHeader.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+        const chunkSize = end - start + 1;
+
+        const buffer = Buffer.alloc(chunkSize);
+        const fd = fs.openSync(decodedPath, 'r');
+        fs.readSync(fd, buffer, 0, chunkSize, start);
+        fs.closeSync(fd);
+
+        return new Response(buffer, {
+          status: 206,
+          headers: {
+            'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+            'Accept-Ranges': 'bytes',
+            'Content-Length': String(chunkSize),
+            'Content-Type': contentType,
+          },
+        });
+      }
+
+      // Full file response (with Accept-Ranges so browser knows it can seek)
+      const buffer = fs.readFileSync(decodedPath);
+      return new Response(buffer, {
+        status: 200,
+        headers: {
+          'Content-Length': String(fileSize),
+          'Content-Type': contentType,
+          'Accept-Ranges': 'bytes',
+        },
+      });
+    } catch (err) {
+      console.error('[Electron] local-file protocol error:', err);
+      return new Response('File not found', { status: 404 });
+    }
+  });
+
   createWindow();
-  // Start Python Backend immediately — don't wait for frontend-ready IPC
-  // The guard in startPythonBackend() prevents duplicate spawns
   console.log('[Electron] App ready. Starting Python Backend eagerly...');
   startPythonBackend();
 });

@@ -198,13 +198,14 @@ const App: React.FC = () => {
     const docId = `DOC-${Date.now()}`;
     let fileStorageKey: string | undefined;
 
-    // Save file blob to IndexedDB if provided
+    // Save file blob (to filesystem in Electron, IndexedDB in browser)
     if (file) {
-      fileStorageKey = `file_${docId}`;
+      const initialKey = `file_${docId}`;
       try {
-        await FileStorageService.saveFile(fileStorageKey, file);
+        // saveFile returns the actual storage key (physical path in Electron, or the initial key in browser)
+        fileStorageKey = await FileStorageService.saveFile(initialKey, file);
       } catch (err) {
-        console.error('[App] -> [ERROR]: Failed to save file to IndexedDB:', err);
+        console.error('[App] -> [ERROR]: Failed to save file:', err);
         showToast('Lỗi khi lưu file. File quá lớn hoặc bộ nhớ đầy.', 'error');
         return;
       }
@@ -374,14 +375,6 @@ const App: React.FC = () => {
                   exams={examList}
                   onSelect={(id) => setCurrentExamIndex(examList.findIndex(e => e.id === id))}
                   onDelete={deleteExam}
-                  documents={studyDocs}
-                  folders={docFolders}
-                  onAddDocument={handleAddDocument}
-                  onUpdateDocument={handleUpdateDocument}
-                  onDeleteDocument={handleDeleteDocument}
-                  onAddFolder={handleAddFolder}
-                  onRenameFolder={handleRenameFolder}
-                  onDeleteFolder={handleDeleteFolder}
                 />
               )}
               {activeTab === 'story' && <MacaronicStory />}

@@ -21,7 +21,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'save-exam-file',
       'delete-exam-file',
       'list-exam-files',
-      'scan-hardware'
+      'scan-hardware',
+      'save-document-file',
+      'read-document-file',
+      'create-folder',
+      'rename-item',
+      'delete-item',
+      'get-library-root',
+      'read-library-dir',
+      'create-library-folder',
+      'rename-library-item',
+      'delete-library-item',
+      'open-in-os-explorer',
+      'open-file-native'
     ];
     if (validChannels.includes(channel)) {
       return ipcRenderer.invoke(channel, ...args);
