@@ -103,7 +103,7 @@ const SpeakingExamPrint: React.FC<Props> = ({ config, questions, mode }) => {
         </div>
       )}
       
-      <div className="absolute bottom-5 left-0 right-0 text-center text-[8pt] text-slate-300">
+      <div className="mt-12 mb-4 pt-4 border-t border-slate-100 text-center text-[8pt] text-slate-400 font-italic">
         EduGen Studio Pro - Hệ thống hỗ trợ khảo thí Speaking
       </div>
     </div>

@@ -175,7 +175,7 @@ const SpeakingExamCreator: React.FC<Props> = ({ onBack, initialManualQuestions }
   // --- PREVIEW VIEW ---
   if (view === 'preview') {
     return (
-      <div className="flex flex-col h-full bg-slate-100">
+      <div className="flex flex-col h-full bg-slate-100 print:bg-white print:h-auto print:block">
         <div className="bg-white border-b px-6 py-3 flex justify-between items-center no-print shadow-sm z-10">
           <button onClick={() => setView('selection')} className="flex items-center gap-2 text-slate-500 hover:text-indigo-600 font-bold text-xs uppercase tracking-wider">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
@@ -186,8 +186,8 @@ const SpeakingExamCreator: React.FC<Props> = ({ onBack, initialManualQuestions }
              <button onClick={() => handlePrint('teacher')} className="px-4 py-2 bg-rose-600 text-white rounded-lg text-xs font-black uppercase tracking-widest hover:bg-rose-700 shadow-lg">📕 In Đáp án</button>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
-          <div className="a4-wrapper mx-auto shadow-2xl">
+        <div className="flex-1 overflow-y-auto p-8 print:p-0 print:overflow-visible custom-scrollbar">
+          <div className="a4-wrapper mx-auto shadow-2xl print:shadow-none print:m-0 print:w-full print:max-w-none">
             <SpeakingExamPrint config={config} questions={examQuestions.map(q => ({
               ...q,
               imageUrl: q.imageUrl ? getImageSrc(q.imageUrl) || q.imageUrl : undefined,

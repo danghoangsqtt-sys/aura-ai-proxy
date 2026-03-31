@@ -395,7 +395,7 @@ const App: React.FC = () => {
           )}
 
           {currentExam && (activeTab === 'library' || activeTab === 'create') && (
-            <div className="flex-1 flex flex-col h-full overflow-hidden animate-content">
+            <div className="flex-1 flex flex-col h-full overflow-hidden animate-content print:h-auto print:block print:overflow-visible">
               <div className="h-12 bg-white border-b px-6 flex justify-between items-center no-print shrink-0">
                 <div className="flex items-center gap-4">
                   <button onClick={() => setCurrentExamIndex(-1)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" /></svg></button>
@@ -414,7 +414,7 @@ const App: React.FC = () => {
                   )}
                 </div>
               </div>
-              <div className="flex-1 overflow-y-auto custom-scrollbar bg-slate-100/20 p-4"><div className="a4-wrapper mx-auto drop-shadow-sm">{viewMode === 'exam' ? <ExamPaper data={currentExam} onUpdateQuestion={handleUpdateQuestion} /> : <AnswerSheet data={currentExam} />}</div></div>
+              <div className="flex-1 overflow-y-auto custom-scrollbar bg-slate-100/20 p-4 print:p-0 print:overflow-visible print:bg-white"><div className="a4-wrapper mx-auto drop-shadow-sm print:drop-shadow-none print:shadow-none print:w-full print:m-0 print:max-w-none">{viewMode === 'exam' ? <ExamPaper data={currentExam} onUpdateQuestion={handleUpdateQuestion} /> : <AnswerSheet data={currentExam} />}</div></div>
             </div>
           )}
         </main>

@@ -66,7 +66,7 @@ const FloatingAura: React.FC<FloatingAuraProps> = ({ isCinematic, onExitCinemati
   };
 
   return (
-    <div className={`fixed bottom-0 right-0 z-[900] p-4 pointer-events-none transition-all duration-700 ease-in-out flex flex-row items-end justify-end gap-6 ${
+    <div className={`print:hidden no-print fixed bottom-0 right-0 z-[900] p-4 pointer-events-none transition-all duration-700 ease-in-out flex flex-row items-end justify-end gap-6 ${
       currentMode === 'speaking_room' 
         ? 'inset-0 items-center justify-center scale-[1.5] origin-center bg-slate-900/40 backdrop-blur-md pointer-events-auto' 
         : 'origin-bottom'

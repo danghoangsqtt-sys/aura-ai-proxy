@@ -127,11 +127,15 @@
         .animate-content { animation: slideIn 0.4s cubic-bezier(0.23, 1, 0.32, 1); }
 
         @media print {
+            @page {
+                size: A4;
+                margin: 20mm;
+            }
             .no-print { display: none !important; }
             body { background: white !important; overflow: visible !important; height: auto !important; }
             .desktop-window, .app-body, .main-workspace, #root { display: block !important; height: auto !important; }
-            .a4-wrapper { padding: 0 !important; }
-            .a4-container { box-shadow: none !important; border: none !important; width: 100% !important; margin: 0 !important; }
+            .a4-wrapper { padding: 0 !important; margin: 0 !important; box-shadow: none !important; }
+            .a4-container { box-shadow: none !important; border: none !important; width: 100% !important; margin: 0 !important; padding: 0 !important; height: auto !important; min-height: 0 !important; }
         }
     </style>
 </head>
