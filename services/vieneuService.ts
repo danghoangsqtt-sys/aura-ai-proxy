@@ -80,8 +80,8 @@ export class VieneuService {
       const url = `http://127.0.0.1:8001/stream?text=${encodeURIComponent(safeText)}&voice_id=${encodeURIComponent(voiceId)}`;
       
       // Ping server with retry logic (Backend can take 30-60s to load TTS+STT models on CPU)
-      const MAX_PING_ATTEMPTS = 15;
-      const PING_INTERVAL_MS = 3000;
+      const MAX_PING_ATTEMPTS = 20;
+      const PING_INTERVAL_MS = 2500;
       let serverAlive = false;
       for (let attempt = 1; attempt <= MAX_PING_ATTEMPTS; attempt++) {
         try {
@@ -95,12 +95,13 @@ export class VieneuService {
           // ignore fetch error
         }
         if (attempt < MAX_PING_ATTEMPTS) {
-          console.warn(`[VieNeu TTS] Server ping attempt ${attempt}/${MAX_PING_ATTEMPTS} failed, retrying in ${PING_INTERVAL_MS / 1000}s...`);
+          console.warn(`[VieNeu TTS] ⏳ ⚠️ Cảnh báo: Server Giọng nói chưa phản hồi (Lần thử ${attempt}/${MAX_PING_ATTEMPTS})...`);
+          console.info(`[VieNeu TTS] Mẹo: Hãy đảm bảo bạn đã chạy 'npm run dev:full' hoặc 'uv run vieneu-stream' trong thư mục backend.`);
           await new Promise(r => setTimeout(r, PING_INTERVAL_MS));
         }
       }
       if (!serverAlive) {
-        console.error("[VieNeu TTS] Server is not responding after 45 seconds. TTS backend may have crashed.");
+        console.error("[VieNeu TTS] ❌ Lỗi: Server Giọng nói không phản hồi sau 50 giây. Có thể Backend đã bị treo.");
         onEnd(); 
         return;
       }

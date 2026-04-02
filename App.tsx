@@ -19,13 +19,15 @@ import MacaronicStory from './components/MacaronicStory';
 import IPAMaster from './components/IPA/IPAMaster';
 import GearSidebar from './components/GearSidebar';
 import WritingMaster from './components/Writing/WritingMaster';
-import SetupWizard from './components/Onboarding/SetupWizard';
+import AuthModal from './components/Auth/AuthModal';
+import { authService } from './services/authService';
 import WelcomePage from './components/WelcomePage';
 import BootScreen from './components/BootScreen';
+import AdminDashboard from './components/AdminDashboard';
 import { useAuraStore } from './store/useAuraStore';
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'home' | 'create' | 'library' | 'game' | 'chatbot' | 'settings' | 'dictionary' | 'speaking' | 'story' | 'ipa' | 'writing'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'create' | 'library' | 'game' | 'chatbot' | 'settings' | 'dictionary' | 'speaking' | 'story' | 'ipa' | 'writing' | 'admin'>('home');
   const [examList, setExamList] = useState<ExamPaperType[]>([]);
   const [studyDocs, setStudyDocs] = useState<StudyDocument[]>([]);
   const [docFolders, setDocFolders] = useState<DocumentFolder[]>([]);
@@ -35,7 +37,8 @@ const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<'exam' | 'answer' | 'both'>('exam');
   const [showPrintMenu, setShowPrintMenu] = useState(false);
   const [isCinematicSpeaking, setIsCinematicSpeaking] = useState(false);
-  const [isFirstRun, setIsFirstRun] = useState<boolean | null>(null);
+  const [user, setUser] = useState<any>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [isSystemBooting, setIsSystemBooting] = useState(true);
   
   const { currentMode, setCurrentMode, isLiveVoice } = useAuraStore();
@@ -68,9 +71,15 @@ const App: React.FC = () => {
     const initApp = async () => {
       console.info('[App] -> [Action]: Initializing App (Local AI Offline Mode)...');
       
-      // Check first run
-      const hasInit = localStorage.getItem('aura_initialized');
-      setIsFirstRun(!hasInit);
+      // Check user authentication
+      try {
+        const currentUser = await authService.getCurrentUser();
+        setUser(currentUser);
+      } catch (err) {
+        setUser(null);
+      } finally {
+        setAuthLoading(false);
+      }
 
       try {
         const savedExams = await LocalFileService.loadAllExams();
@@ -262,18 +271,17 @@ const App: React.FC = () => {
 
   // Skip desktop update checks and window controls as we migrated to web
 
-  if (isFirstRun === null) return null; // Loading state
+  if (authLoading) return null; // Loading state
 
-  if (isFirstRun) {
-    return <SetupWizard onComplete={() => {
-      localStorage.setItem('aura_initialized', 'true');
-      setIsFirstRun(false);
-    }} />;
+  if (!user) {
+    return <AuthModal onSuccess={(u) => setUser(u)} />;
   }
 
   if (isSystemBooting) {
     return <BootScreen onReady={() => setIsSystemBooting(false)} />;
   }
+
+  const isAdmin = user?.email === 'danghoang.sqtt@dhsystem.com';
 
   return (
     <div className="desktop-window">
@@ -289,13 +297,45 @@ const App: React.FC = () => {
           {toast.msg}
         </div>
       )}
-      <div className="h-12 bg-white border-b px-4 flex items-center justify-between no-print shadow-sm">
+      <div className="h-12 bg-white border-b px-4 flex items-center justify-between no-print shadow-sm relative z-[990]">
         <div className="flex items-center gap-3">
            <div className="w-6 h-6 bg-indigo-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-200">
              <span className="text-[10px] text-white font-black italic">A</span>
            </div>
            <span className="text-xs font-black text-slate-800 uppercase tracking-[3px]">Aura Edu Studio</span>
         </div>
+
+        {/* User Profile */}
+        {user && (
+          <div className="flex items-center gap-4 border-l border-slate-100 pl-4">
+             <div className="text-right hidden sm:block">
+                <p className="text-[10px] font-black text-slate-800 uppercase tracking-widest">{user.name || 'Học viên Aura'}</p>
+                <p className="text-[9px] font-bold text-slate-400">{user.email}</p>
+             </div>
+             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-100 to-blue-50 border border-indigo-200 flex items-center justify-center shrink-0 shadow-sm relative group cursor-pointer">
+                <span className="text-xs font-black text-indigo-700 uppercase">{user.name ? user.name.charAt(0) : 'A'}</span>
+                {isAdmin && (
+                   <div className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-amber-400 rounded-full border-2 border-white flex items-center justify-center text-[7px]" title="Quản trị viên">
+                      👑
+                   </div>
+                )}
+             </div>
+             <button 
+                onClick={async () => {
+                   try {
+                     await authService.logout();
+                     setUser(null);
+                   } catch (e) {
+                     console.error(e);
+                   }
+                }}
+                className="w-7 h-7 bg-rose-50 rounded-lg flex items-center justify-center text-rose-500 hover:bg-rose-500 hover:text-white transition-colors border border-rose-100 shrink-0"
+                title="Đăng xuất"
+             >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+             </button>
+          </div>
+        )}
       </div>
 
       <div className="app-body" style={{ height: 'calc(100vh - 48px)' }}>
@@ -383,6 +423,7 @@ const App: React.FC = () => {
               {activeTab === 'writing' && <div className="h-full animate-content"><WritingMaster /></div>}
               {activeTab === 'dictionary' && <div className="h-full p-4 animate-content max-w-5xl mx-auto"><DictionaryPanel /></div>}
               {activeTab === 'game' && <div className="h-full animate-content"><GameCenter initialQuestions={currentExam?.questions || []} initialExamTitle={currentExam?.config.title || ""} examList={examList} /></div>}
+              {activeTab === 'admin' && <AdminDashboard />}
               {activeTab === 'settings' && <div className="h-full animate-content"><SettingsPanel /></div>}
             </>
           )}
@@ -423,7 +464,10 @@ const App: React.FC = () => {
         isCinematic={isCinematicSpeaking} 
         onExitCinematic={() => setIsCinematicSpeaking(false)} 
       />
-      <GearSidebar activeTab={activeTab as any} onTabChange={(tab: any) => { 
+      <GearSidebar 
+        activeTab={activeTab as any} 
+        isAdmin={user?.email === 'danghoang.sqtt@dhsystem.com'}
+        onTabChange={(tab: any) => { 
           console.info('[App] -> [Routing]: Switching to tab:', tab);
           setActiveTab(tab); 
           setCurrentMode('dashboard');

@@ -7,129 +7,63 @@
  * When running in a browser (no Electron), falls back to IndexedDB blob storage.
  */
 
-const DB_NAME = 'aura_file_storage';
-const DB_VERSION = 1;
-const STORE_NAME = 'files';
+import { ID } from 'appwrite';
+import { storage as appwriteStorage } from './appwriteConfig';
 
-// ── Electron detection ──
-function isElectron(): boolean {
-  return !!(window as any).electronAPI;
-}
-
-function getElectronAPI(): any {
-  return (window as any).electronAPI;
-}
-
-// ── IndexedDB helpers (fallback) ──
-function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME);
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
+const BUCKET_ID = import.meta.env.VITE_APPWRITE_BUCKET_ID || 'Documents';
 
 export class FileStorageService {
   /**
-   * Save a file blob.
-   * Electron: saves to filesystem, returns the physical file path as the key.
-   * Browser:  saves to IndexedDB with the given key.
+   * Save a file blob to Appwrite Storage
    */
   static async saveFile(key: string, blob: Blob): Promise<string> {
-    if (isElectron()) {
-      try {
-        const api = getElectronAPI();
-        const arrayBuffer = await blob.arrayBuffer();
-        const result = await api.invoke('save-document-file', key, arrayBuffer);
-        if (result?.success && result.path) {
-          // Return the physical file path as the new storage key
-          return result.path;
-        }
-      } catch (err) {
-        console.error('[FileStorage] Electron save failed, falling back to IndexedDB:', err);
-      }
+    try {
+      const file = new File([blob], key, { type: blob.type });
+      const response = await appwriteStorage.createFile(BUCKET_ID, ID.unique(), file);
+      return response.$id;
+    } catch (error) {
+       console.error('[FileStorage] Appwrite save failed, falling back to local memory if needed:', error);
+       throw error;
     }
-    // Fallback: IndexedDB
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite');
-      tx.objectStore(STORE_NAME).put(blob, key);
-      tx.oncomplete = () => resolve(key);
-      tx.onerror = () => reject(tx.error);
-    });
   }
 
   /**
-   * Get a file blob.
-   * Electron: if key looks like an absolute path, reads from filesystem via IPC.
-   * Browser:  reads from IndexedDB.
+   * Get a file url for viewing (Appwrite returns direct URL)
    */
   static async getFile(key: string): Promise<Blob | null> {
-    // If key is a physical path (saved by Electron), read via IPC
-    if (isElectron() && this.isPhysicalPath(key)) {
-      try {
-        const api = getElectronAPI();
-        const result = await api.invoke('read-document-file', key);
-        if (result?.success && result.buffer) {
-          return new Blob([result.buffer]);
-        }
-      } catch (err) {
-        console.error('[FileStorage] Electron read failed:', err);
+    try {
+      const url = appwriteStorage.getFileDownload(BUCKET_ID, key);
+      const res = await fetch(url.toString());
+      if (res.ok) {
+         return await res.blob();
       }
       return null;
+    } catch (error) {
+      console.error('[FileStorage] Appwrite get failed:', error);
+      return null;
     }
-    // Fallback: IndexedDB
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readonly');
-      const request = tx.objectStore(STORE_NAME).get(key);
-      request.onsuccess = () => resolve(request.result || null);
-      request.onerror = () => reject(request.error);
-    });
   }
 
   /**
-   * Delete a file blob from IndexedDB (filesystem files are not auto-deleted).
+   * Delete a file from Appwrite Storage
    */
   static async deleteFile(key: string): Promise<void> {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite');
-      tx.objectStore(STORE_NAME).delete(key);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
+    try {
+      await appwriteStorage.deleteFile(BUCKET_ID, key);
+    } catch (error) {
+      console.error('[FileStorage] Appwrite delete failed:', error);
+    }
   }
 
   /**
    * Create a URL for rendering a stored file.
-   * Electron + physical path: returns `local-file://` URL (bypasses CORS).
-   * Browser / IndexedDB:     returns an Object URL (caller must revoke).
    */
   static async getFileUrl(key: string): Promise<string | null> {
-    // Physical path → use custom protocol
-    if (isElectron() && this.isPhysicalPath(key)) {
-      // Convert backslashes to forward slashes and use triple-slash to prevent
-      // Chromium from interpreting the drive letter as a hostname
-      const safePath = key.replace(/\\/g, '/');
-      return `local-file:///${safePath}`;
+    try {
+        const url = appwriteStorage.getFileView(BUCKET_ID, key);
+        return url.toString();
+    } catch (error) {
+        return null;
     }
-    // Fallback: create Object URL from IndexedDB blob
-    const blob = await this.getFile(key);
-    if (!blob) return null;
-    return URL.createObjectURL(blob);
-  }
-
-  /**
-   * Check if a key looks like a physical file path (e.g. C:\..., /home/...).
-   */
-  private static isPhysicalPath(key: string): boolean {
-    return /^[A-Za-z]:[/\\]/.test(key) || key.startsWith('/');
   }
 }

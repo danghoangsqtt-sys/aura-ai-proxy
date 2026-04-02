@@ -3,41 +3,28 @@
  * Nâng cấp: hỗ trợ lưu đề thi dạng file riêng biệt + chọn thư mục
  */
 
-const getElectronAPI = () => (window as any).electronAPI;
+import { CloudDatabaseService } from './cloudDatabaseService';
 
 export class LocalFileService {
   static async getHardwareInfo() {
-    const api = getElectronAPI();
-    if (!api) return { cpu: 'N/A', ram: 0, gpu: 'N/A' };
-    return await api.invoke('get-hardware-info');
+    return { cpu: 'Web (Cloud)', ram: 0, gpu: 'N/A' };
   }
 
   static async checkOllamaStatus() {
-    const api = getElectronAPI();
-    if (!api) return false;
-    return await api.invoke('check-ollama');
+    return false; // Removed Ollama
   }
 
-  // ===== LEGACY: Lưu tất cả vào 1 file (backward-compatible) =====
+  // ===== LEGACY DATA =====
   static async saveData(fileName: string, data: any) {
-    const api = getElectronAPI();
-    if (!api) {
-      localStorage.setItem(`aura_${fileName}`, JSON.stringify(data));
-      return { success: true };
-    }
-    return await api.invoke('save-local-data', fileName, data);
+    localStorage.setItem(`aura_${fileName}`, JSON.stringify(data));
+    return { success: true };
   }
 
   static async loadData(fileName: string) {
-    const api = getElectronAPI();
-    if (!api) {
-      const data = localStorage.getItem(`aura_${fileName}`);
-      return data ? JSON.parse(data) : null;
-    }
-    return await api.invoke('load-local-data', fileName);
+    const data = localStorage.getItem(`aura_${fileName}`);
+    return data ? JSON.parse(data) : null;
   }
 
-  // Legacy helpers
   static async saveExams(exams: any[]) {
     return await this.saveData('exams', exams);
   }
@@ -54,64 +41,62 @@ export class LocalFileService {
     return await this.loadData('settings');
   }
 
-  // ===== NEW: Per-exam file storage =====
+  // ===== NEW: Appwrite Integration =====
 
-  /**
-   * Lưu 1 đề thi thành 1 file JSON riêng biệt
-   */
   static async saveExamFile(examData: any): Promise<{ success: boolean; path?: string; error?: string }> {
-    const api = getElectronAPI();
-    if (!api) {
-      // Fallback: lưu vào localStorage
+    try {
+      const result = await CloudDatabaseService.saveExam(examData);
+      return { success: result.success, error: result.error };
+    } catch (err: any) {
+      console.warn("Lưu qua Cloud thất bại, fallback tạm thời xuống localStorage", err);
+      // Fallback: lưu vào localStorage nếu chưa login (guest mode)
       const exams = JSON.parse(localStorage.getItem('aura_exams_v2') || '[]');
       const idx = exams.findIndex((e: any) => e.id === examData.id);
       if (idx >= 0) exams[idx] = examData; else exams.unshift(examData);
       localStorage.setItem('aura_exams_v2', JSON.stringify(exams));
       return { success: true };
     }
-    return await api.invoke('save-exam-file', examData);
   }
 
-  /**
-   * Xóa 1 file đề thi
-   */
   static async deleteExamFile(examId: string): Promise<{ success: boolean; error?: string }> {
-    const api = getElectronAPI();
-    if (!api) {
+    try {
+      const result = await CloudDatabaseService.deleteExam(examId);
+      // Xóa đồng thời trên localStorage (nếu có)
       const exams = JSON.parse(localStorage.getItem('aura_exams_v2') || '[]');
       const filtered = exams.filter((e: any) => e.id !== examId);
       localStorage.setItem('aura_exams_v2', JSON.stringify(filtered));
-      return { success: true };
+      
+      return { success: result.success, error: result.error };
+    } catch (err: any) {
+      return { success: false, error: err.message };
     }
-    return await api.invoke('delete-exam-file', examId);
   }
 
-  /**
-   * Đọc tất cả đề thi từ thư mục (đã sắp xếp mới nhất trước)
-   */
   static async loadAllExams(): Promise<any[]> {
-    const api = getElectronAPI();
-    if (!api) {
-      return JSON.parse(localStorage.getItem('aura_exams_v2') || '[]');
+    try {
+      const cloudExams = await CloudDatabaseService.loadAllExams();
+      // Gom lại với các exam cũ trên local (sau này cần strategy merge)
+      const localExams = JSON.parse(localStorage.getItem('aura_exams_v2') || '[]');
+      
+      // Merge by ID
+      const map = new Map<string, any>();
+      localExams.forEach((e: any) => map.set(e.id, e));
+      cloudExams.forEach((e: any) => map.set(e.id, e)); // Cloud overrides local
+      
+      return Array.from(map.values()).sort((a, b) => {
+         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
+    } catch (err: any) {
+       console.warn("Không thể tải từ Cloud, hiện thông tin Local.", err);
+       return JSON.parse(localStorage.getItem('aura_exams_v2') || '[]');
     }
-    return await api.invoke('list-exam-files');
   }
 
-  /**
-   * Mở dialog chọn thư mục lưu trữ
-   */
   static async selectStorageFolder(): Promise<string | null> {
-    const api = getElectronAPI();
-    if (!api) return null;
-    return await api.invoke('select-storage-folder');
+    return null;
   }
 
-  /**
-   * Lấy đường dẫn thư mục lưu trữ hiện tại
-   */
   static async getStorageFolder(): Promise<string> {
-    const api = getElectronAPI();
-    if (!api) return 'localStorage (browser mode)';
-    return await api.invoke('get-storage-folder');
+    return 'Appwrite Cloud Storage';
   }
 }

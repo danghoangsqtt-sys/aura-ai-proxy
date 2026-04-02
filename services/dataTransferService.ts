@@ -1,6 +1,6 @@
-
 import { vocabStorage } from './localDataService';
 import { storage, STORAGE_KEYS } from './storageAdapter';
+import { LocalFileService } from './localFileService';
 
 // Định nghĩa cấu trúc file Backup
 interface EduGenBackupData {
@@ -28,10 +28,17 @@ export const dataTransferService = {
   /**
    * Thu thập toàn bộ dữ liệu và đóng gói (ASYNC)
    */
-  exportData: async (includeSensitive = true): Promise<boolean> => {
+  exportData: async (includeSensitive = false): Promise<boolean> => {
     try {
-      // 1. Gom dữ liệu từ Storage Adapter (Async)
-      const exams = await storage.get(STORAGE_KEYS.EXAMS, []);
+      // 1. Gom dữ liệu từ Storage Adapter (Async) và Hệ điều hành (Electron FS)
+      const storageExams = await storage.get(STORAGE_KEYS.EXAMS, []);
+      const osExams = await LocalFileService.loadAllExams() || [];
+      
+      // Hợp nhất đề thi: Lấy danh sách không trùng lặp (dựa theo ID)
+      const examMap = new Map();
+      [...storageExams, ...osExams].forEach((e: any) => { if (e && e.id) examMap.set(e.id, e); });
+      const exams = Array.from(examMap.values());
+
       const settings = await storage.get(STORAGE_KEYS.SETTINGS, {});
       const apiKey = await storage.get(STORAGE_KEYS.API_KEY, '');
       const speakingManual = await storage.get(STORAGE_KEYS.SPEAKING_MANUAL, []);

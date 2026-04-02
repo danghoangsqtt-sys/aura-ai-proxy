@@ -27,18 +27,8 @@ export const useGeminiLive = () => {
   }, []);
 
   const connect = async (instruction?: string) => {
-    // Primary: AIConfigService (Settings panel)
-    // Fallback: legacy key + env variable
-    const apiKey = AIConfigService.getGeminiApiKey()
-      || localStorage.getItem('edugen_api_key')
-      || (import.meta as any).env.VITE_GEMINI_API_KEY;
-    
-    if (!apiKey || apiKey === 'your_actual_api_key_here') {
-        console.error("[useGeminiLive] -> [Auth Error]: Missing or invalid API Key.");
-        throw new Error("Vui lòng cấu hình Gemini API Key trong phần Cài đặt.");
-    }
-
-    console.info('[useGeminiLive] -> [Auth]: API Key resolved successfully.');
+    console.error("[useGeminiLive] -> [Auth Error]: Gemini Live is not supported via Proxy OAuth Bypass.");
+    throw new Error("Tính năng Gemini Live (Voice 2-way Thời gian thực) tạm ngưng hỗ trợ qua kết nối Proxy.");
 
     try {
         // Initialize Audio Player for incoming audio
@@ -49,7 +39,7 @@ export const useGeminiLive = () => {
         });
 
         // Initialize Live Service
-        liveServiceRef.current = new LiveService(apiKey);
+        liveServiceRef.current = new LiveService('proxy_mode_disabled');
         liveServiceRef.current.onConnected = async () => {
             setConnected(true);
             

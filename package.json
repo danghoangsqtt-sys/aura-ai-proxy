@@ -3,7 +3,6 @@
   "version": "1.0.7",
   "description": "Hệ thống biên soạn đề thi thông minh AI",
   "type": "module",
-  "main": "electron/main.ts",
   "changelog": [
     "Chuyển đổi sang kiến trúc SaaS (Web App)",
     "Tích hợp Appwrite cho hệ thống xác thực và dữ liệu đám mây",
@@ -14,8 +13,7 @@
     "start": "vite",
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "electron:dev": "concurrently \"vite\" \"wait-on tcp:5173 && cross-env NODE_ENV=development electron .\""
+    "preview": "vite preview"
   },
   "keywords": [],
   "author": "EduGen Team",
@@ -25,14 +23,9 @@
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@vitejs/plugin-react": "^4.7.0",
-    "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
-    "electron": "^41.0.3",
-    "electron-builder": "^26.8.1",
-    "ts-node": "^10.9.2",
     "typescript": "^5.2.2",
-    "vite": "^7.0.0",
-    "wait-on": "^9.0.4"
+    "vite": "^7.0.0"
   },
   "dependencies": {
     "@google/genai": "^1.46.0",
@@ -48,7 +41,6 @@
     "react-markdown": "^9.1.0",
     "react-zoom-pan-pinch": "^3.7.0",
     "remark-gfm": "^4.0.1",
-    "systeminformation": "^5.31.4",
     "uuid": "^13.0.0",
     "zustand": "^5.0.12"
   }

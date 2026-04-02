@@ -46,13 +46,18 @@ export const useLive2D = ({ containerRef, modelUrl, volume, state }: UseLive2DOp
     const containerWidth = containerRef.current.clientWidth;
     const containerHeight = containerRef.current.clientHeight;
 
-    const targetScaleY = (containerHeight / modelHeight) * 2.0; 
-    const targetScaleX = (containerWidth / modelWidth) * 1.1;
-    const scale = Math.max(targetScaleX, targetScaleY);
+    // More balanced scaling logic
+    const scaleY = containerHeight / modelHeight;
+    const scaleX = containerWidth / modelWidth;
+    const scale = Math.min(scaleX, scaleY) * 0.95; // Slightly smaller for safe margins
     
     model.scale.set(scale);
+    
+    // Center horizontally
     model.x = (containerWidth - modelWidth * scale) / 2;
-    model.y = containerHeight * 0.05;
+    
+    // Position vertically (slightly above bottom to show the face clearly)
+    model.y = containerHeight * 0.1; 
   }, [containerRef]);
 
   useEffect(() => {
@@ -112,13 +117,13 @@ export const useLive2D = ({ containerRef, modelUrl, volume, state }: UseLive2DOp
           return;
         }
 
-        model.interactive = false;
+        (model as any).interactive = false;
         if (model.internalModel) {
           (model.internalModel as any).interactive = false;
         }
 
         modelRef.current = model;
-        app.stage.addChild(model);
+        (app.stage as any).addChild(model);
         
         fitModel();
 
@@ -161,9 +166,9 @@ export const useLive2D = ({ containerRef, modelUrl, volume, state }: UseLive2DOp
           }
         };
 
-        model.internalModel.on('beforeModelUpdate', lipSyncUpdate);
+        (model.internalModel as any).on('beforeModelUpdate', lipSyncUpdate);
         (model as any)._cleanupLipSync = () => {
-          model.internalModel.off('beforeModelUpdate', lipSyncUpdate);
+          (model.internalModel as any).off('beforeModelUpdate', lipSyncUpdate);
         };
 
         if (isMounted) {
@@ -183,15 +188,28 @@ export const useLive2D = ({ containerRef, modelUrl, volume, state }: UseLive2DOp
       console.info('[Live2D Engine] -> [Action]: Destroying WebGL context and releasing GPU memory.');
       isMounted = false;
       isInitialized.current = false;
+
+      // 1. Destroy Model
       if (modelRef.current) {
         if (modelRef.current._cleanupMouseMove) modelRef.current._cleanupMouseMove();
         if (modelRef.current._cleanupLipSync) modelRef.current._cleanupLipSync();
-        modelRef.current.destroy();
+        modelRef.current.destroy({ children: true, texture: true, baseTexture: true });
         modelRef.current = null;
       }
+
+      // 2. Destroy Pixi App strictly
       if (appRef.current) {
+        appRef.current.stop();
         appRef.current.destroy(true, { children: true, texture: true, baseTexture: true });
         appRef.current = null;
+      }
+
+      // 3. Force global Pixi cache cleanup to avoid WebGL context leakage
+      try {
+        PIXI.utils.clearTextureCache();
+        PIXI.utils.destroyTextureCache();
+      } catch (e) {
+        console.warn('[Live2D Engine] -> Cleanup warning:', e);
       }
     };
   }, [modelUrl, containerRef, fitModel]);

@@ -5,40 +5,11 @@
  */
 
 import { ExamConfig, Question } from "../types";
-import { OllamaService } from "./ollamaService";
 import { AIConfigService } from "./aiConfigService";
-import { GoogleGenAI } from "@google/genai";
 
 export class ExamGeneratorService {
-  private static readonly GENERATE_ENDPOINT = 'http://localhost:11434/api/generate';
-  private static readonly FETCH_TIMEOUT = 120000; // 120s for slow CPUs
-  private static readonly MAX_PER_CALL = 8; // 8 questions per Ollama call (balanced for 1b-7b models)
 
   // ===== UTILITIES =====
-
-  private static async fetchWithTimeout(url: string, options: any): Promise<Response> {
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), this.FETCH_TIMEOUT);
-    try {
-      return await fetch(url, { ...options, signal: controller.signal });
-    } finally {
-      clearTimeout(id);
-    }
-  }
-
-  /**
-   * Re-use OllamaService model picking — it already has priority logic
-   */
-  private static async pickBestModel(): Promise<string> {
-    const models = await OllamaService.fetchModels();
-    const priority = ['qwen2.5:7b', 'qwen2.5:3b', 'llama3:8b', 'gemma2:9b', 'gemma2:2b', 'llama3.2:3b', 'llama3.2:1b'];
-    for (const preferred of priority) {
-      const [name, tag] = preferred.split(':');
-      const found = models.find(m => m.startsWith(name) && m.includes(tag));
-      if (found) return found;
-    }
-    return models[0] || 'llama3.2:1b';
-  }
 
   /**
    * Extract clean JSON from LLM response (strips markdown fences, etc.)
@@ -213,31 +184,7 @@ Now generate ${batchCount} NEW, UNIQUE questions. Remember: every question MUST 
   // ===== MAIN ENTRY POINT (Factory Pattern) =====
 
   static async generateQuiz(config: ExamConfig): Promise<Question[]> {
-    // Always read fresh from localStorage to respect latest user selection
-    const freshConfig = AIConfigService.getFreshConfig();
-    const provider = freshConfig.provider;
-    console.info(`[ExamGen] Using provider: ${provider} (fresh read)`);
-
-    if (provider === 'gemini') {
-      try {
-        return await this.generateViaGemini(config);
-      } catch (err: any) {
-        const msg = err.message || '';
-        // Auto-fallback to Ollama if Gemini quota is exhausted
-        if (msg.includes('hết hạn mức') || msg.includes('limit: 0') || msg.includes('liên tục bị giới hạn')) {
-          console.warn('[ExamGen] Gemini quota exhausted — falling back to Ollama...');
-          this.emitStatus('⚠️ Gemini hết hạn mức. Tự động chuyển sang AI Nội bộ (Ollama)...', 'warning');
-          try {
-            return await this.generateViaOllama(config);
-          } catch (ollamaErr: any) {
-            // If Ollama also fails, throw the original Gemini error + Ollama error
-            throw new Error(`Gemini: ${msg}\nOllama fallback cũng thất bại: ${ollamaErr.message}`);
-          }
-        }
-        throw err; // Re-throw non-quota errors
-      }
-    }
-    return this.generateViaOllama(config);
+    return await this.generateViaGemini(config);
   }
 
   // ===== GEMINI CLOUD PATH =====
@@ -311,23 +258,23 @@ Now generate ${totalQ} NEW, UNIQUE questions covering all sections above. Every 
   }
 
   private static async generateViaGemini(config: ExamConfig): Promise<Question[]> {
-    const apiKey = AIConfigService.getFreshConfig().geminiApiKey;
-    if (!apiKey || apiKey.trim().length === 0) {
-      throw new Error('API Key không hợp lệ hoặc chưa được thiết lập. Vào Cài đặt → Cấu hình AI để nhập Gemini API Key.');
+    const cfg = AIConfigService.getFreshConfig();
+    const proxyUrl = cfg.proxyUrl?.replace(/\/$/, '') || 'http://localhost:8317';
+    const model = cfg.model || 'gemini-2.5-flash';
+
+    if (!proxyUrl || proxyUrl.trim().length === 0) {
+      throw new Error('Chưa thiết lập Proxy URL. Vào Cài đặt để cấu hình hệ thống AI.');
     }
 
-    const ai = new GoogleGenAI({ apiKey });
     const totalQuestions = config.sections.reduce((sum, s) => sum + s.count, 0);
 
     // === STRATEGY: Minimize API calls to save RPM ===
-    // Split into chunks only if >40 questions (rare), otherwise 1 call
     const GEMINI_MAX_PER_CALL = 40;
     const chunks: ExamConfig['sections'][] = [];
 
     if (totalQuestions <= GEMINI_MAX_PER_CALL) {
       chunks.push(config.sections);
     } else {
-      // Split sections into groups with ~40 questions each
       let currentChunk: ExamConfig['sections'] = [];
       let currentCount = 0;
       for (const sec of config.sections) {
@@ -342,7 +289,7 @@ Now generate ${totalQ} NEW, UNIQUE questions covering all sections above. Every 
       if (currentChunk.length > 0) chunks.push(currentChunk);
     }
 
-    console.info(`[ExamGen/Gemini] Total: ${totalQuestions}Q | API calls planned: ${chunks.length}`);
+    console.info(`[ExamGen/Proxy] Total: ${totalQuestions}Q | API calls planned: ${chunks.length}`);
 
     const allQuestions: Question[] = [];
     const MAX_429_RETRIES = 3;
@@ -358,17 +305,29 @@ Now generate ${totalQ} NEW, UNIQUE questions covering all sections above. Every 
 
       while (!success) {
         try {
-          const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            config: {
+          const res = await fetch(`${proxyUrl}/v1/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: model,
+              messages: [{ role: 'user', content: prompt }],
               temperature: 0.9,
-              topP: 0.95,
-              responseMimeType: 'application/json',
-            }
+              response_format: { type: 'json_object' }
+            }),
           });
-
-          const text = response.text || '';
+          
+          if (res.status === 401) {
+            throw new Error('UNAUTHORIZED: Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+          }
+          if (res.status === 429) {
+            throw new Error('Hệ thống AI đang quá tải (429). Vui lòng thử lại sau 1 phút.');
+          }
+          if (!res.ok) {
+            throw new Error(`Lỗi máy chủ AI: ${res.status}`);
+          }
+          
+          const data = await res.json();
+          const text = data?.choices?.[0]?.message?.content || '';
           const cleaned = this.extractJSON(text);
           const parsed = JSON.parse(cleaned);
           const rawQuestions = this.extractArray(parsed);
@@ -435,81 +394,4 @@ Now generate ${totalQ} NEW, UNIQUE questions covering all sections above. Every 
     return allQuestions.map((q, i) => ({ ...q, id: `q_${stamp}_${i}` }));
   }
 
-  // ===== OLLAMA LOCAL PATH =====
-
-  private static async generateViaOllama(config: ExamConfig): Promise<Question[]> {
-    const cfgModel = AIConfigService.getModel();
-    const model = cfgModel || await this.pickBestModel();
-    const totalQuestions = config.sections.reduce((sum, s) => sum + s.count, 0);
-    console.info(`[ExamGen/Ollama] Model: ${model} | Total: ${totalQuestions}Q | Sections: ${config.sections.length}`);
-
-    const allQuestions: Question[] = [];
-
-    for (let secIdx = 0; secIdx < config.sections.length; secIdx++) {
-      const section = config.sections[secIdx];
-      let remaining = section.count;
-
-      while (remaining > 0) {
-        const batchSize = Math.min(remaining, this.MAX_PER_CALL);
-        console.info(`[ExamGen/Ollama] Section ${secIdx + 1} | Batch: ${batchSize}Q`);
-
-        let lastError: string | undefined;
-        let batchSuccess = false;
-
-        for (let attempt = 0; attempt < 3; attempt++) {
-          try {
-            const prompt = this.buildPrompt(config, section, secIdx, batchSize, attempt > 0 ? lastError : undefined);
-
-            const response = await this.fetchWithTimeout(this.GENERATE_ENDPOINT, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                model,
-                prompt,
-                stream: false,
-                format: "json",
-                options: { temperature: 0.7, top_p: 0.9, num_ctx: 4096, num_thread: 4 }
-              })
-            });
-
-            if (response.status === 404) {
-              throw new Error(`Mô hình AI '${model}' chưa được tải xuống máy tính. Vui lòng mở Terminal và chạy lệnh: ollama pull ${model}`);
-            }
-            if (!response.ok) {
-              const errBody = await response.text().catch(() => '');
-              throw new Error(`Lỗi Ollama (${response.status}): ${errBody || response.statusText}`);
-            }
-            const data = await response.json();
-            const cleaned = this.extractJSON(data.response);
-            const parsed = JSON.parse(cleaned);
-            const rawQuestions = this.extractArray(parsed);
-            const sanitized = this.sanitizeQuestions(rawQuestions);
-
-            allQuestions.push(...sanitized);
-            console.info(`[ExamGen/Ollama] ✅ Batch OK: ${sanitized.length} questions`);
-            batchSuccess = true;
-            break;
-          } catch (err: any) {
-            lastError = err.message;
-            console.warn(`[ExamGen/Ollama] Attempt ${attempt + 1} failed:`, err.message);
-            if (attempt === 2) throw new Error(`Không thể sinh câu hỏi phần ${secIdx + 1} sau 3 lần thử. Lỗi: ${err.message}`);
-          }
-        }
-
-        if (batchSuccess) {
-          remaining -= batchSize;
-        }
-      }
-    }
-
-    // Overwrite IDs — never trust LLM-generated IDs
-    const stamp = Date.now();
-    const finalQuestions = allQuestions.map((q, index) => ({
-      ...q,
-      id: `q_${stamp}_${index}`
-    }));
-
-    console.info(`[ExamGen/Ollama] ✅ Complete: ${finalQuestions.length}/${totalQuestions} questions generated.`);
-    return finalQuestions;
-  }
 }

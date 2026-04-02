@@ -1,7 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { SpeakingQuestion, SpeakingFeedback } from '../types';
-import { OllamaService } from '../services/ollamaService';
 import { AIConfigService } from '../services/aiConfigService';
 import { evaluateSpeakingSession } from '../services/speakingService';
 import { storage, STORAGE_KEYS } from '../services/storageAdapter';
@@ -209,17 +208,9 @@ const SpeakingBasicMode: React.FC<Props> = ({ onBack }) => {
           const base64Audio = (reader.result as string).split(',')[1];
           try {
             const currentQ = filteredQuestions[currentQIndex];
-            const provider = AIConfigService.getProvider();
 
             let result: SpeakingFeedback;
-            if (provider === 'gemini') {
-              // Gemini: gửi audio trực tiếp, bypass STT
-              result = await evaluateSpeakingSession(currentQ.question, base64Audio, currentQ.sampleAnswer);
-            } else {
-              // Ollama: STT trước → evaluate bằng text
-              const transcription = await OllamaService.speechToText(base64Audio);
-              result = await OllamaService.evaluateSpeaking(currentQ.question, transcription);
-            }
+            result = await evaluateSpeakingSession(currentQ.question, base64Audio, currentQ.sampleAnswer);
             setFeedback(result);
           } catch (err) {
             console.error('[SpeakingBasic] Evaluation error:', err);

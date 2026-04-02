@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { OllamaService } from '../services/ollamaService';
-import { generateMacaronicStory as geminiMacaronicStory } from '../services/geminiService';
+import { generateMacaronicStory } from '../services/geminiService';
 import { AIConfigService } from '../services/aiConfigService';
 import { canvasStorage } from '../services/localDataService';
 import { PersonalVocabData } from '../types';
@@ -115,16 +114,11 @@ const MacaronicStory: React.FC = () => {
     setResultEn(null);
     setIsGenerating(true);
     try {
-      const provider = AIConfigService.getFreshConfig().provider;
       const callApi = (lang: 'vi' | 'en') => {
-        if (provider === 'gemini') {
-          return geminiMacaronicStory(words.trim(), topic.trim(), lang);
-        } else {
-          return OllamaService.generateMacaronicStory(words.trim(), topic.trim(), lang);
-        }
+        return generateMacaronicStory(words.trim(), topic.trim(), lang);
       };
 
-      console.log(`[MacaronicStory] Generating BOTH Vi-En & En-Vi using ${provider}`);
+      console.log(`[MacaronicStory] Generating BOTH Vi-En & En-Vi using Gemini`);
       const [viResult, enResult] = await Promise.allSettled([callApi('vi'), callApi('en')]);
 
       if (viResult.status === 'fulfilled') setResultVi(viResult.value as any);

@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
 import { STTService } from '../services/sttService';
-import { OllamaService, ChatMessage as OllamaChatMessage } from '../services/ollamaService';
+import { sendChatMessage, ChatMessage as GeminiChatMessage } from '../services/geminiService';
 import { VieneuService } from '../services/vieneuService';
 import { useAuraStore } from '../store/useAuraStore';
 
@@ -102,8 +102,8 @@ export const useAuraLocalVoice = () => {
     setIsThinking(true);
 
     try {
-      // Chuẩn bị history cho Ollama — inject system prompt nếu có
-      const history: OllamaChatMessage[] = [];
+      // Chuẩn bị history cho Gemini — inject system prompt nếu có
+      const history: GeminiChatMessage[] = [];
 
       // BUG FIX: Inject system prompt (VD: IPA Clinic phonetician instruction)
       if (systemPromptRef.current) {
@@ -112,12 +112,12 @@ export const useAuraLocalVoice = () => {
 
       // Thêm lịch sử hội thoại (6 tin gần nhất)
       const recentMsgs = messagesRef.current.slice(-6).map(m => ({
-        role: (m.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+        role: (m.role === 'user' ? 'user' : 'model') as 'user' | 'model',
         content: m.text
       }));
       history.push(...recentMsgs);
 
-      const responseText = await OllamaService.sendChatMessage(history, text);
+      const responseText = await sendChatMessage(history, text);
       setIsThinking(false);
       addMessage('model', responseText);
 
@@ -125,7 +125,7 @@ export const useAuraLocalVoice = () => {
       speakAura(responseText);
 
     } catch (err) {
-      console.error("[useAuraLocalVoice] -> Ollama Error:", err);
+      console.error("[useAuraLocalVoice] -> Gemini Error:", err);
       setIsThinking(false);
     }
   };
@@ -170,7 +170,7 @@ export const useAuraLocalVoice = () => {
     setMessages([]);
     messagesRef.current = [];
 
-    // Lưu system prompt để inject vào mỗi lần gọi Ollama
+    // Lưu system prompt để inject vào mỗi lần gọi Gemini
     systemPromptRef.current = systemPrompt || null;
 
     if (initialGreeting) {

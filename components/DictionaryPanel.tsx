@@ -1,6 +1,24 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { OllamaService, DictionaryResponse } from '../services/ollamaService';
+export interface DictionaryResponse {
+  vocabulary: string;
+  phonetics?: { uk: string; us: string };
+  wordFamily?: string[];
+  usageNotes?: string;
+  idiomsAndPhrasals?: { phrase: string; meaning: string; example: string }[];
+  specializedMeanings?: { field: string; meanings: { meaning: string; example?: string }[] }[];
+  compoundWords?: { word: string; meaning: string }[];
+  details: {
+    pos: string;
+    meanings: {
+      meaning: string;
+      examples: string[];
+      synonyms?: string[];
+      antonyms?: string[];
+      context?: string;
+    }[];
+  }[];
+}
 import WordFormationGuide from './Dictionary/WordFormationGuide';
 import PartsOfSpeechGuide from './Dictionary/PartsOfSpeechGuide';
 import WordStressGuide from './Dictionary/WordStressGuide';
@@ -12,6 +30,7 @@ import { searchOfflineDictionary } from '../services/localDictService';
 import { getLearnedWord, saveLearnedWord } from '../services/learnedDictService';
 import { enrichWithExternalData } from '../services/externalDictionaryService';
 import { analyzeWordMorphology } from '../services/morphologyService';
+import { analyzeLanguage } from '../services/geminiService';
 import { 
   BookOpen, 
   Volume2, 
@@ -104,7 +123,7 @@ const DictionaryPanel: React.FC = () => {
         field: spec.field,
         meanings: spec.meanings.map(m => ({
           mean: m.meaning,
-          example: m.example
+          example: m.example || ""
         }))
       })),
       compoundWords: result.compoundWords,
@@ -197,7 +216,8 @@ const DictionaryPanel: React.FC = () => {
     setIsNotFoundOffline(false);
     setError(null);
     try {
-      const result = await OllamaService.analyzeWordWithAI(query);
+      let result;
+      result = await analyzeLanguage(query);
       
       // Tự động lưu vào "Trí nhớ cục bộ" (Learned Dictionary)
       saveLearnedWord(query, result);
@@ -207,8 +227,8 @@ const DictionaryPanel: React.FC = () => {
       setAiData(result); 
       setOfflineData(harmonizedData); 
     } catch (err: any) {
-      console.error("[Dictionary] AI Search failed:", err);
-      setError('Không thể kết nối với trí tuệ nhân tạo Aura lúc này.');
+      console.error("[Dictionary] All AI Engines failed:", err);
+      setError('Không thể kết nối với trí tuệ nhân tạo Aura. Vui lòng kiểm tra API Key hoặc LLM cục bộ.');
     } finally {
       setAiLoading(false);
     }
@@ -609,13 +629,17 @@ const DictionaryPanel: React.FC = () => {
                               
                               {/* Multiple Examples with translation */}
                               <div className="space-y-1.5 pl-9">
-                                {(m.examples || [m.example]).filter(Boolean).map((ex, exIdx) => (
-                                  <div key={exIdx} className="border-l-2 border-slate-50 pl-3 py-0.5 transition-all group-hover:border-indigo-100">
-                                    <p className="text-sm font-medium text-slate-600 italic leading-relaxed">
-                                      {ex}
-                                    </p>
-                                  </div>
-                                ))}
+                                {(() => {
+                                  const rawExamples = m.examples || m.example || [];
+                                  const safeExamples = Array.isArray(rawExamples) ? rawExamples : [rawExamples];
+                                  return safeExamples.filter(Boolean).map((ex, exIdx) => (
+                                    <div key={exIdx} className="border-l-2 border-slate-50 pl-3 py-0.5 transition-all group-hover:border-indigo-100">
+                                      <p className="text-sm font-medium text-slate-600 italic leading-relaxed">
+                                        {String(ex)}
+                                      </p>
+                                    </div>
+                                  ));
+                                })()}
                               </div>
 
                               {/* Synonyms & Antonyms */}

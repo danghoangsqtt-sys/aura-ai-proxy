@@ -3,10 +3,16 @@ import React, { useState, useEffect, useCallback } from 'react';
 import SpeakingExamCreator from './SpeakingExamCreator';
 import SpeakingBasicMode from './SpeakingBasicMode';
 import SpeakingTopicMode from './SpeakingTopicMode';
-import { OllamaService } from '../services/ollamaService';
+import { sendChatMessage } from '../services/geminiService';
 import { STTService } from '../services/sttService';
 import { AIConfigService } from '../services/aiConfigService';
-import { GoogleGenAI } from '@google/genai';
+import { OfflineTTSService } from '../services/offlineTTSService';
+import Live2DAvatar from './Live2DAvatar';
+import { EyeState, AppMode } from '../types';
+import { 
+  X, Mic, MicOff, Info, Sparkles, Brain, Award, 
+  MessageSquare, Volume2, ArrowRight, Home, RefreshCw
+} from 'lucide-react';
 
 const auraExaminerInstruction = `You are an adaptive and professional English examiner. Your goal is to conduct a speaking test that adjusts to the user's proficiency level (A1 to C2). 
 Conduct the test in parts:
@@ -24,29 +30,24 @@ const SpeakingArena: React.FC<SpeakingArenaProps> = ({ onExit }) => {
   const [hints, setHints] = useState<string[]>([]);
   const [isGeneratingHint, setIsGeneratingHint] = useState(false);
   
+  // Aura State
+  const [auraState, setAuraState] = useState<EyeState>(EyeState.IDLE);
+  const [auraVolume, setAuraVolume] = useState(0);
+  const tts = OfflineTTSService.getInstance();
+
   const [isRecording, setIsRecording] = useState(false);
   const [messages, setMessages] = useState<{role: 'user' | 'model', text: string}[]>([]);
 
-  // ===== TTS MODULE =====
+  // ===== TTS MODULE (UPGRADED) =====
   const speakText = useCallback((text: string) => {
-    // Cancel any ongoing TTS to prevent overlapping
-    window.speechSynthesis.cancel();
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'en-US';
-    utterance.rate = 0.95;
-    utterance.pitch = 1.0;
-
-    // Try to pick a high-quality English voice
-    const voices = window.speechSynthesis.getVoices();
-    const preferred = voices.find(v =>
-      v.lang.startsWith('en') && (v.name.includes('Female') || v.name.includes('Zira') || v.name.includes('Samantha') || v.name.includes('Google'))
-    ) || voices.find(v => v.lang.startsWith('en'));
-    if (preferred) utterance.voice = preferred;
-
-    // Fire-and-forget: UI text is already rendered, TTS plays async
-    window.speechSynthesis.speak(utterance);
-  }, []);
+    tts.stop();
+    setAuraState(EyeState.SPEAKING);
+    tts.speak(
+      text,
+      (vol) => setAuraVolume(vol),
+      () => setAuraState(EyeState.IDLE)
+    );
+  }, [tts]);
 
   // Cleanup TTS on unmount
   useEffect(() => {
@@ -73,32 +74,11 @@ const SpeakingArena: React.FC<SpeakingArenaProps> = ({ onExit }) => {
     setMessages(newHistory as any);
     
     try {
-      const provider = AIConfigService.getProvider();
-      let response: string;
-
-      if (provider === 'gemini') {
-        // Gemini route — direct GoogleGenAI SDK
-        const apiKey = AIConfigService.getGeminiApiKey();
-        if (!apiKey) throw new Error('Chưa cấu hình Gemini API Key.');
-        const ai = new GoogleGenAI({ apiKey });
-        const contents = newHistory.map(m => ({
-          role: m.role as 'user' | 'model',
-          parts: [{ text: m.text }]
-        }));
-        contents.push({ role: 'user', parts: [{ text: `(System: ${auraExaminerInstruction})` }] });
-        const res = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: contents,
-        });
-        response = res.text || '';
-      } else {
-        // Ollama route
         const chatHistory = newHistory.map(m => ({
-          role: m.role === 'model' ? 'assistant' : 'user',
+          role: m.role as 'user' | 'model',
           content: m.text
-        })) as any;
-        response = await OllamaService.sendChatMessage(chatHistory, `Continue as the examiner. Help the student improve. (Prompt instruction: ${auraExaminerInstruction})`);
-      }
+        }));
+        const response = await sendChatMessage(chatHistory, `Continue as the examiner. Help the student improve. (Prompt instruction: ${auraExaminerInstruction})`);
 
       // Update UI first (non-blocking), then TTS reads async
       setMessages([...newHistory, { role: 'model', text: response }] as any);
@@ -260,15 +240,26 @@ const SpeakingArena: React.FC<SpeakingArenaProps> = ({ onExit }) => {
             </div>
 
             {/* Main Stage */}
-            <div className="flex-1 flex flex-col items-center justify-center p-12 relative">
-                <div className="relative w-full h-full flex items-center justify-center scale-150 -translate-y-12">
-                   {/* Subtitles Overlay */}
-                   <div className="absolute bottom-20 left-1/2 -translate-x-1/2 w-full max-w-xl text-center px-6 py-4 bg-black/40 backdrop-blur-lg border border-white/10 rounded-3xl animate-in fade-in duration-1000">
-                      <p className="text-white text-lg font-medium drop-shadow-lg tracking-wide">
-                        {messages.length > 0 ? messages[messages.length - 1].text : "Hãy trả lời câu hỏi của giám khảo..."}
-                      </p>
-                   </div>
-                </div>
+            <div className="flex-1 relative flex flex-col justify-end">
+               {/* Avatar Container */}
+               <div className="absolute inset-0 flex items-center justify-center pointer-events-none overflow-hidden">
+                  <div className="w-full h-full scale-[0.85] translate-y-12">
+                     <Live2DAvatar 
+                        state={auraState} 
+                        mode={AppMode.VOICE} 
+                        volume={auraVolume} 
+                     />
+                  </div>
+               </div>
+               
+               {/* Subtitles Overlay - Lowered and Compact */}
+               <div className="relative z-50 w-full max-w-2xl mx-auto px-6 pb-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <div className="bg-black/60 backdrop-blur-2xl border border-white/10 rounded-[32px] px-8 py-5 shadow-2xl text-center">
+                    <p className="text-white text-lg font-bold drop-shadow-lg tracking-wide leading-relaxed">
+                      {messages.length > 0 ? messages[messages.length - 1].text : "Đang bắt đầu bài thi..."}
+                    </p>
+                  </div>
+               </div>
             </div>
         </div>
 

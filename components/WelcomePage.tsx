@@ -1,108 +1,250 @@
-import React from 'react';
-
-interface FeatureCardProps {
-  title: string;
-  description: string;
-  icon: string;
-  color: string;
-  onClick: () => void;
-}
-
-const FeatureCard: React.FC<FeatureCardProps> = ({ title, description, icon, color, onClick }) => (
-  <div 
-    onClick={onClick}
-    className="group relative cursor-pointer overflow-hidden rounded-2xl border border-white/20 bg-white/40 p-5 shadow-2xl backdrop-blur-2xl transition-all duration-500 hover:-translate-y-2 hover:bg-white/60 hover:shadow-indigo-200/50"
-  >
-    <div className={`mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br ${color} text-2xl shadow-lg transition-transform duration-500 group-hover:scale-110 group-hover:rotate-3`}>
-      {icon}
-    </div>
-    <h3 className="mb-3 text-xl font-black text-slate-800 uppercase tracking-tight">{title}</h3>
-    <p className="text-sm font-medium leading-relaxed text-slate-500">{description}</p>
-    
-    {/* Decorative element */}
-    <div className="absolute -bottom-4 -right-4 h-24 w-24 rounded-full bg-indigo-500/5 transition-transform duration-700 group-hover:scale-150" />
-  </div>
-);
+import React, { useRef, useState, useEffect } from 'react';
+import { Sparkles, Mic, FileText, BookOpen, PenTool, BrainCircuit, Heart } from 'lucide-react';
 
 interface WelcomePageProps {
   onNavigate: (tab: any) => void;
 }
 
-const WelcomePage: React.FC<WelcomePageProps> = ({ onNavigate }) => {
-  return (
-    <div className="relative min-h-full overflow-hidden bg-slate-50/50 font-sans p-6 lg:p-10">
-      {/* Background Orbs */}
-      <div className="absolute -top-24 -left-24 h-96 w-96 rounded-full bg-indigo-200/20 blur-[100px]" />
-      <div className="absolute -bottom-24 -right-24 h-96 w-96 rounded-full bg-rose-200/20 blur-[100px]" />
+// ----------------------------------------------------------------------
+// 3D Parallax Tilt Card Component
+// ----------------------------------------------------------------------
+interface TiltProps {
+  children: React.ReactNode;
+  className?: string;
+  contentClassName?: string;
+  onClick?: () => void;
+  depth?: number;
+}
 
-      <div className="relative z-10 mx-auto max-w-6xl">
-        {/* Header Section */}
-        <header className="mb-16 text-center lg:text-left">
-          <div className="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50/50 px-4 py-1.5 mb-6">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-400 opacity-75"></span>
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-indigo-500"></span>
+const TiltCard: React.FC<TiltProps> = ({ children, className = '', contentClassName = '', onClick, depth = 30 }) => {
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [rotate, setRotate] = useState({ x: 0, y: 0 });
+  const [isHovering, setIsHovering] = useState(false);
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!cardRef.current) return;
+    const box = cardRef.current.getBoundingClientRect();
+    const x = e.clientX - box.left;
+    const y = e.clientY - box.top;
+    
+    const centerX = box.width / 2;
+    const centerY = box.height / 2;
+    
+    // Mức độ nghiêng 3D (Tối đa 6-8 độ để giữ sự tinh tế)
+    const rotateX = -((y - centerY) / centerY) * 6; 
+    const rotateY = ((x - centerX) / centerX) * 6;
+    
+    setRotate({ x: rotateX, y: rotateY });
+  };
+
+  const handleMouseEnter = () => setIsHovering(true);
+  
+  const handleMouseLeave = () => {
+    setIsHovering(false);
+    setRotate({ x: 0, y: 0 });
+  };
+
+  return (
+    <div 
+      ref={cardRef}
+      onMouseMove={handleMouseMove}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      onClick={onClick}
+      style={{ perspective: '1200px' }}
+      className={`relative rounded-3xl cursor-pointer block ${className}`}
+    >
+      {/* Khối nền Card Chính (Có Transform 3D) */}
+      <div 
+        style={{ 
+          transform: isHovering 
+            ? `rotateX(${rotate.x}deg) rotateY(${rotate.y}deg) scale3d(1.03, 1.03, 1.03)` 
+            : 'rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1)',
+          transformStyle: 'preserve-3d',
+          transition: isHovering ? 'transform 0.1s ease-out' : 'transform 0.7s cubic-bezier(0.23, 1, 0.32, 1)',
+        }}
+        className={`w-full h-full rounded-3xl group overflow-hidden ${contentClassName}`}
+      >
+         {/* Lớp nội dung (Nổi bật lên trên mặt thẻ Z-axis) */}
+         <div 
+            style={{ 
+             transform: isHovering ? `translateZ(${depth}px)` : 'translateZ(0px)',
+             transition: 'transform 0.5s cubic-bezier(0.23, 1, 0.32, 1)'
+           }}
+           className="w-full h-full flex flex-col justify-between"
+         >
+           {children}
+         </div>
+      </div>
+    </div>
+  );
+};
+
+// ----------------------------------------------------------------------
+// Main Welcome Page
+// ----------------------------------------------------------------------
+const WelcomePage: React.FC<WelcomePageProps> = ({ onNavigate }) => {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  return (
+    <div className="relative min-h-full overflow-hidden bg-slate-50 font-sans p-4 lg:p-6 flex items-center justify-center">
+      
+      {/* Background Mesh */}
+      <div className="absolute top-0 left-1/4 w-[40rem] h-[40rem] bg-indigo-400/10 rounded-full blur-[120px] mix-blend-multiply opacity-80 animate-pulse pointer-events-none" />
+      <div className="absolute top-1/4 right-1/4 w-[30rem] h-[30rem] bg-violet-400/10 rounded-full blur-[120px] mix-blend-multiply opacity-80 animate-pulse pointer-events-none" style={{ animationDelay: '1s' }} />
+
+      {/* Main Unified Dashboard Container */}
+      <div className={`relative z-10 w-full max-w-6xl mx-auto bg-white/40 backdrop-blur-2xl ring-1 ring-white/80 rounded-[2.5rem] shadow-[0_8px_40px_rgba(0,0,0,0.06)] p-6 md:p-10 flex flex-col transition-opacity duration-1000 ${mounted ? 'opacity-100' : 'opacity-0'}`}>
+          
+        {/* HERO SECTION DEVOID OF SYSTEM JARGON */}
+        <header className="mb-8 text-center animate-in slide-in-from-bottom-4 fade-in duration-1000">
+          <div className="inline-flex items-center gap-2 rounded-full border border-indigo-200/50 bg-white/80 backdrop-blur-md px-4 py-1.5 mb-5 shadow-sm hover:shadow-md transition-all cursor-pointer group hover:scale-105">
+            <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+            <span className="text-[10px] font-black uppercase tracking-[2px] text-slate-700 group-hover:text-indigo-600 transition-colors">
+              Trải nghiệm Học thuật Thông minh
             </span>
-            <span className="text-[10px] font-black uppercase tracking-[3px] text-indigo-600">AI Local Engine v2.0 • Offline Ready</span>
           </div>
           
-          <h1 className="mb-4 text-4xl font-black italic tracking-tighter text-slate-900 lg:text-5xl">
-            Chào mừng đến với <span className="bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">Aura Gen</span>
+          <h1 className="mb-3 text-3xl font-black tracking-tight text-slate-900 lg:text-5xl leading-tight">
+            Chinh phục Tiếng Anh, <br className="hidden lg:block"/>
+            <span className="bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 bg-clip-text text-transparent">hành trình đầy cảm hứng.</span>
           </h1>
-          <p className="max-w-2xl text-base font-bold leading-relaxed text-slate-400 tracking-wide">
-            Hệ thống học tập Tiếng Anh AI quyền năng. Tự động hóa việc tạo đề, luyện nói và sáng tác truyện 
-            cho mọi cấp độ <span className="text-slate-700 underline decoration-indigo-300 decoration-wavy underline-offset-4">(A1 - C2)</span> - Hoàn toàn ngoại tuyến & bảo mật.
+          <p className="mx-auto max-w-lg text-xs lg:text-sm font-medium leading-relaxed text-slate-500">
+            Khai mở thế giới kiến thức cùng người bạn đồng hành Aura ảo. Giao tiếp tự nhiên, 
+            truyền cảm hứng trọn vẹn từng khoảnh khắc học tập.
           </p>
         </header>
 
-        {/* Feature Grid */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <FeatureCard 
-            title="Tạo Đề Thi"
-            description="Tận dụng sức mạnh AI để tạo đề thi tùy chỉnh mọi cấp độ (A1-C2) chỉ trong vài giây."
-            icon="✏️"
-            color="from-indigo-500 to-blue-500"
-            onClick={() => onNavigate('create')}
-          />
-          <FeatureCard 
-            title="Truyện Chêm"
-            description="Luyện từ vựng qua phương pháp truyện chêm (Macaronic Story) thông minh do AI sáng tác."
-            icon="📚"
-            color="from-pink-500 to-rose-500"
-            onClick={() => onNavigate('story')}
-          />
-          <FeatureCard 
-            title="Gia sư Aura"
-            description="Tương tác giọng nói và chat với trợ lý Aura - Mentor thích ứng theo trình độ của bạn."
-            icon="🎤"
-            color="from-emerald-500 to-green-500"
+        {/* 3D BENTO GRID */}
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 lg:gap-5 auto-rows-max" style={{ perspective: '2000px' }}>
+
+          {/* BLOCK 1: Gia sư Aura */}
+          <TiltCard 
             onClick={() => onNavigate('speaking')}
-          />
-          <FeatureCard 
-            title="Từ Vựng"
-            description="Quản lý kho từ vựng cá nhân, phân loại thông minh và ôn tập hiệu quả."
-            icon="🔤"
-            color="from-amber-500 to-orange-500"
+            depth={50}
+            className="md:col-span-2 lg:col-span-2 md:row-span-2 animate-in slide-in-from-bottom-8 fade-in duration-700 delay-100 fill-mode-both"
+            contentClassName="bg-gradient-to-br from-indigo-50/90 to-white/80 p-6 md:p-8 border border-white/90 shadow-sm hover:shadow-[0_20px_40px_rgba(99,102,241,0.2)]"
+          >
+            {/* Hologram Aura Core Glow */}
+            <div className="absolute -right-10 -top-10 w-40 h-40 bg-indigo-500/15 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-1000"></div>
+            
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-lg shadow-indigo-200 mb-8 transition-transform duration-500 group-hover:scale-110 group-hover:-rotate-6 group-hover:shadow-indigo-300">
+              <Mic className="w-7 h-7" />
+            </div>
+            
+            <div className="mt-auto pt-16">
+              <div className="flex items-center gap-2 mb-2">
+                <h3 className="text-2xl lg:text-3xl font-black text-slate-800 tracking-tight">Gia sư Aura 2D</h3>
+                <span className="px-2.5 py-0.5 bg-rose-100 text-rose-600 text-[10px] font-black uppercase tracking-widest rounded-full animate-pulse">Hot</span>
+              </div>
+              <p className="text-slate-500 font-medium text-xs lg:text-sm leading-relaxed max-w-xs">
+                Người bạn đồng hành tương tác giọng nói 24/7. Cùng bạn trò chuyện nhàn rỗi hoặc luyện giao tiếp mạch lạc.
+              </p>
+            </div>
+          </TiltCard>
+
+          {/* BLOCK 2: Tạo Đề Thi */}
+          <TiltCard 
+            onClick={() => onNavigate('create')}
+            depth={40}
+            className="md:col-span-1 lg:col-span-2 animate-in slide-in-from-bottom-8 fade-in duration-700 delay-200 fill-mode-both"
+            contentClassName="bg-white/80 p-6 border border-white/80 shadow-sm hover:shadow-[0_15px_35px_rgba(139,92,246,0.15)]"
+          >
+            <div className="flex justify-between items-start mb-6">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-violet-100 text-violet-600 transition-transform duration-500 group-hover:scale-110 group-hover:rotate-6">
+                <FileText className="w-6 h-6" />
+              </div>
+            </div>
+            <div>
+              <h3 className="text-lg lg:text-xl font-black text-slate-800 mb-1 lg:mb-2 tracking-tight">AI Tạo bài tập</h3>
+              <p className="text-slate-500 font-medium text-xs leading-relaxed">
+                Thỏa sức khám phá những bộ câu đố, bài đọc sáng tạo dựa trên sở thích cá nhân của bạn.
+              </p>
+            </div>
+          </TiltCard>
+
+          {/* BLOCK 3: Từ Vựng */}
+          <TiltCard 
             onClick={() => onNavigate('dictionary')}
-          />
+            depth={30}
+            className="lg:col-span-1 animate-in slide-in-from-bottom-8 fade-in duration-700 delay-300 fill-mode-both"
+            contentClassName="bg-white/80 p-5 px-6 border border-white/80 shadow-sm hover:shadow-[0_15px_30px_rgba(245,158,11,0.15)]"
+          >
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-100 text-amber-500 mb-6 transition-transform duration-500 group-hover:scale-110">
+              <BookOpen className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-[17px] font-black text-slate-800 mb-1">Thư Viện Lexicon</h3>
+              <p className="text-slate-500 font-medium text-[11px] leading-relaxed">Bộ sưu tập từ vựng, bắt lỗi ngữ pháp thông minh.</p>
+            </div>
+          </TiltCard>
+
+          {/* BLOCK 4: Luyện Viết */}
+          <TiltCard 
+            onClick={() => onNavigate('writing')}
+            depth={30}
+            className="lg:col-span-1 animate-in slide-in-from-bottom-8 fade-in duration-700 delay-[400ms] fill-mode-both"
+            contentClassName="bg-white/80 p-5 px-6 border border-white/80 shadow-sm hover:shadow-[0_15px_30px_rgba(16,185,129,0.15)]"
+          >
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-100 text-emerald-500 mb-6 transition-transform duration-500 group-hover:scale-110">
+              <PenTool className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-[17px] font-black text-slate-800 mb-1">Không Gian Viết</h3>
+              <p className="text-slate-500 font-medium text-[11px] leading-relaxed">Góc sáng tác luận văn tự do, mượt mà và sâu lắng.</p>
+            </div>
+          </TiltCard>
+
+          {/* BLOCK 5: Truyện Chêm */}
+          <TiltCard 
+            onClick={() => onNavigate('story')}
+            depth={40}
+            className="md:col-span-2 lg:col-span-3 animate-in slide-in-from-bottom-8 fade-in duration-700 delay-[500ms] fill-mode-both"
+            contentClassName="bg-gradient-to-r from-rose-50/80 to-pink-50/80 p-5 lg:px-8 border border-white/90 shadow-sm hover:shadow-[0_20px_40px_rgba(244,63,94,0.15)] flow-root"
+          >
+             <div className="flex flex-col md:flex-row md:items-center gap-5 h-full">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-rose-400 to-pink-500 text-white shadow-lg shadow-rose-200 transition-transform duration-500 group-hover:scale-110 group-hover:rotate-12">
+                  <BrainCircuit className="w-7 h-7" />
+                </div>
+                <div className="flex-1 mt-auto md:mt-0">
+                  <h3 className="text-lg lg:text-xl font-black text-slate-800 mb-1 tracking-tight">Truyện Chêm Macaronic</h3>
+                  <p className="text-slate-500 font-medium text-xs leading-relaxed max-w-xl">
+                    Đắm mình trong những mẫu chuyện song ngữ lôi cuốn, khắc ghi từ vựng vào trí nhớ một cách vô thức.
+                  </p>
+                </div>
+             </div>
+          </TiltCard>
+
+          {/* NEW BLOCK 6: DHSystem Author Widget - Redesigned to be 'Creator' focused rather than 'Architecture' */}
+          <TiltCard 
+            depth={20}
+            className="lg:col-span-1 animate-in slide-in-from-bottom-8 fade-in duration-700 delay-[600ms] fill-mode-both"
+            contentClassName="bg-slate-900 overflow-hidden p-6 shadow-xl flex flex-col justify-between"
+          >
+            {/* Soft Ambient Creator Glow */}
+            <div className="absolute top-0 right-0 w-32 h-32 bg-purple-500/20 blur-3xl rounded-full -translate-y-1/2 translate-x-1/2 group-hover:bg-pink-500/30 transition-colors duration-1000"></div>
+            
+            <div className="flex justify-between items-start mb-6 relative z-10">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/10 text-pink-300 transition-transform duration-500 group-hover:scale-110 group-hover:rotate-12">
+                <Heart className="w-5 h-5 fill-pink-300" />
+              </div>
+            </div>
+            
+            <div className="relative z-10 mt-auto pt-10">
+              <p className="text-[10px] font-black uppercase tracking-[3px] text-slate-400 mb-1">Crafted With Passion</p>
+              <h3 className="text-xl font-black text-white tracking-tight flex items-center gap-2">
+                DHSystem
+                <span className="w-1.5 h-1.5 rounded-full bg-pink-400/80 mt-1 shadow-[0_0_10px_rgba(244,114,182,1)] animate-pulse"></span>
+              </h3>
+              <p className="text-[10px] font-medium text-slate-400 mt-1.5">Aura Learning Space © 2026</p>
+            </div>
+          </TiltCard>
+          
         </div>
 
-        {/* Stats / Footer info */}
-        <footer className="mt-16 flex flex-wrap items-center justify-center gap-8 border-t border-slate-200/60 pt-8 lg:justify-start">
-          <div className="flex flex-col">
-            <span className="text-2xl font-black text-slate-800">100%</span>
-            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Offline Secure</span>
-          </div>
-          <div className="flex flex-col">
-            <span className="text-2xl font-black text-slate-800 tracking-tight">A1 - C2</span>
-            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Adaptive Levels</span>
-          </div>
-          <div className="flex flex-col">
-            <span className="text-2xl font-black text-slate-800">20+</span>
-            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Smart Modules</span>
-          </div>
-        </footer>
       </div>
+      
     </div>
   );
 };

@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { SavedWord, PersonalVocabData, VocabFolder } from '../../types';
 import { canvasStorage } from '../../services/localDataService';
-import { OllamaService } from '../../services/ollamaService';
+import { extractVocabFromText } from '../../services/geminiService';
 import { Volume2, Trash2, FolderPlus, Folder, FolderOpen, Search, Inbox, BookOpen, X, Check, Edit3 } from 'lucide-react';
 
 const VocabBankCanvas: React.FC = () => {
@@ -126,7 +126,7 @@ const VocabBankCanvas: React.FC = () => {
     if (!scannedText.trim()) return;
     setIsScanning(true);
     try {
-      const extracted = await OllamaService.extractVocabulary(scannedText);
+      const extracted = await extractVocabFromText(scannedText);
       const newWords: SavedWord[] = extracted.map((item: any) => ({
         id: `scan_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         word: item.word,

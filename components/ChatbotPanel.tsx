@@ -2,13 +2,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { OllamaService, ChatMessage } from '../services/ollamaService';
+import { sendChatMessage, ChatMessage } from '../services/geminiService';
 import { VieneuService } from '../services/vieneuService';
 import { STTService } from '../services/sttService';
 import { useAuraStore } from '../store/useAuraStore';
 
 interface Message {
-  role: 'user' | 'assistant';
+  role: 'user' | 'model';
   content: string;
   timestamp: string;
 }
@@ -20,7 +20,7 @@ interface ChatbotPanelProps {
 const ChatbotPanel: React.FC<ChatbotPanelProps> = ({ onClose }) => {
   const [messages, setMessages] = useState<Message[]>([
     { 
-      role: 'assistant', 
+      role: 'model', 
       content: 'Xin chào! Mình là **Aura**, gia sư AI của bạn. Hôm nay mình có thể giúp gì cho bạn trong việc học tập nào? 😊',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
@@ -79,7 +79,7 @@ const ChatbotPanel: React.FC<ChatbotPanelProps> = ({ onClose }) => {
   };
 
   const stopGeneration = () => {
-    OllamaService.cancelGeneration();
+    setIsTyping(false);
     setIsTyping(false);
   };
 
@@ -108,15 +108,15 @@ const ChatbotPanel: React.FC<ChatbotPanelProps> = ({ onClose }) => {
     setIsTyping(true);
 
     try {
-      const history: ChatMessage[] = messages.filter(m => m.role !== 'assistant' || m.content !== messages[0].content).map(m => ({
+      const history: ChatMessage[] = messages.filter(m => m.role !== 'model' || m.content !== messages[0].content).map(m => ({
         role: m.role,
         content: m.content
       }));
 
-      const responseText = await OllamaService.sendChatMessage(history, content);
+      const responseText = await sendChatMessage(history, content);
       
       const newAssistantMsg: Message = {
-        role: 'assistant',
+        role: 'model',
         content: responseText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
@@ -220,7 +220,7 @@ const ChatbotPanel: React.FC<ChatbotPanelProps> = ({ onClose }) => {
               <div className={`mt-1.5 flex items-center gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
                 <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">{msg.timestamp}</span>
                 
-                {msg.role === 'assistant' && (
+                {msg.role === 'model' && (
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button onClick={() => speakMessage(msg.content)} className={`p-1.5 rounded-md bg-white border border-slate-100 shadow-sm transition-all ${isAuraSpeaking ? 'text-indigo-600 ring-1 ring-indigo-100' : 'text-slate-400 hover:text-indigo-600'}`} title="Đọc">
                       <svg className={`w-3 h-3 ${isAuraSpeaking ? 'animate-pulse' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>

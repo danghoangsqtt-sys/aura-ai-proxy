@@ -1,8 +1,8 @@
 import React, { useState, useCallback } from 'react';
 import { IPASound } from '../../data/ipaData';
 import { ipaPracticeMap } from '../../data/ipaPracticeData';
-import { getVideoFilename } from '../../data/ipaVideoMap';
 import { analyzePronunciation, PronunciationFeedback } from '../../services/geminiService';
+import { getVideoEmbedUrl, hasVideo } from '../../data/ipaVideoMap';
 import PracticeItem from '../PracticeItem';
 import IPAQuiz from './IPAQuiz';
 
@@ -32,6 +32,8 @@ const SoundDetail: React.FC<SoundDetailProps> = ({ sound, onBack }) => {
 
   // Get practice data for this sound
   const practiceData = ipaPracticeMap[sound.symbol];
+  const videoUrl = getVideoEmbedUrl(sound.symbol);
+  const videoAvailable = hasVideo(sound.symbol);
 
   return (
     <div className="w-full max-w-6xl mx-auto pb-12">
@@ -100,17 +102,17 @@ const SoundDetail: React.FC<SoundDetailProps> = ({ sound, onBack }) => {
         {/* Right Content Area: Tabs */}
         <div className="flex-1 flex flex-col bg-white">
           {/* Tabs Nav */}
-          <div className="flex border-b border-slate-100 px-6 pt-6 overflow-x-auto no-scrollbar">
+          <div className="flex border-b border-slate-100 px-4 md:px-6 pt-4 md:pt-6 overflow-x-auto no-scrollbar">
             {[
-              { id: 'theory', label: 'Lý thuyết & Video' },
-              { id: 'practice', label: 'Luyện phát âm AI' },
-              { id: 'pairs', label: 'Cặp âm dễ nhầm' },
-              { id: 'quiz', label: 'Bài tập' }
+              { id: 'theory', label: '📖 Lý thuyết' },
+              { id: 'practice', label: '🎙️ Luyện AI' },
+              { id: 'pairs', label: '🔀 Cặp âm' },
+              { id: 'quiz', label: '🎯 Bài tập' }
             ].map(tab => (
                <button
                  key={tab.id}
                  onClick={() => setActiveTab(tab.id as any)}
-                 className={`px-6 py-4 font-bold text-sm whitespace-nowrap border-b-2 transition-colors ${
+                 className={`px-4 md:px-6 py-3 md:py-4 font-bold text-xs md:text-sm whitespace-nowrap border-b-2 transition-colors ${
                    activeTab === tab.id 
                     ? 'border-indigo-600 text-indigo-600' 
                     : 'border-transparent text-slate-400 hover:text-slate-600'
@@ -122,26 +124,55 @@ const SoundDetail: React.FC<SoundDetailProps> = ({ sound, onBack }) => {
           </div>
 
           {/* Tab Content */}
-          <div className="flex-1 p-8 overflow-y-auto">
-            
+          <div className="flex-1 p-4 md:p-8 overflow-y-auto">
+
             {/* THEORY TAB */}
             {activeTab === 'theory' && (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <h3 className="text-xl font-bold text-slate-800 mb-6">Video Hướng Dẫn Kỹ Thuật (Offline)</h3>
-                <div className="aspect-video w-full rounded-2xl overflow-hidden shadow-lg border border-slate-200 bg-slate-900 group relative">
-                  <video 
-                    controls
-                    className="w-full h-full object-cover"
-                    src={`/videos/${getVideoFilename(sound.symbol)}.mp4`}
-                    poster={`/videos/posters/${getVideoFilename(sound.symbol)}.jpg`}
+                <h3 className="text-lg md:text-xl font-bold text-slate-800 mb-4 md:mb-6">Video Hướng Dẫn</h3>
+                {videoAvailable && videoUrl ? (
+                  <div className="flex flex-col gap-3">
+                    <div className="aspect-video w-full rounded-2xl overflow-hidden shadow-lg border border-slate-200 bg-slate-900">
+                      <iframe 
+                        src={videoUrl}
+                        className="w-full h-full border-none"
+                        allowFullScreen
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        title={`Video hướng dẫn âm ${sound.symbol}`}
+                      />
+                    </div>
+                    <div className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-200">
+                      <span className="text-slate-500 text-xs flex-1 pr-4">
+                        <strong className="text-rose-500 font-bold">Lưu ý:</strong> Trình duyệt hoặc Extension (tiện ích mở rộng) của bạn có thể vô tình chặn video Google Drive. Nếu thấy hộp xám báo lỗi, vui lòng xem ở cửa sổ mới.
+                      </span>
+                      <a href={videoUrl} target="_blank" rel="noreferrer" className="px-4 py-2 bg-white hover:bg-indigo-50 text-indigo-700 font-bold rounded-lg transition-colors border border-slate-200 shadow-sm text-xs flex items-center gap-2 shrink-0">
+                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+                         Xem trên Google Drive
+                      </a>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="aspect-video w-full rounded-2xl bg-slate-100 border-2 border-dashed border-slate-300 flex flex-col items-center justify-center gap-3">
+                    <span className="text-4xl opacity-30">🎬</span>
+                    <p className="text-sm text-slate-400 font-medium text-center px-4">
+                      Video chưa được cập nhật cho âm /{sound.symbol}/
+                    </p>
+                    <p className="text-xs text-slate-300">Admin có thể thêm Google Drive link trong ipaVideoMap.ts</p>
+                  </div>
+                )}
+
+                {/* YouTube Search Link */}
+                <div className="mt-4 p-4 bg-indigo-50 rounded-xl border border-indigo-100">
+                  <p className="text-sm text-indigo-700 font-medium mb-2">🔗 Tìm thêm video hướng dẫn trên YouTube:</p>
+                  <a 
+                    href={`https://www.youtube.com/results?search_query=${encodeURIComponent(sound.youtubeQuery)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-sm text-indigo-600 hover:text-indigo-800 underline font-bold"
                   >
-                    Trình duyệt của bạn không hỗ trợ thẻ video.
-                  </video>
-                  <div className="absolute inset-0 pointer-events-none border-4 border-transparent group-hover:border-indigo-500/20 transition-colors rounded-2xl"></div>
+                    {sound.youtubeQuery} →
+                  </a>
                 </div>
-                <p className="mt-4 text-sm text-slate-500 text-center">
-                  * Yêu cầu file video: <code className="bg-slate-100 px-1.5 py-0.5 rounded text-xs">{getVideoFilename(sound.symbol)}.mp4</code>
-                </p>
               </div>
             )}
 

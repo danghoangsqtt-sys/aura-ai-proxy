@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-type TabKey = 'home' | 'create' | 'library' | 'game' | 'chatbot' | 'settings' | 'dictionary' | 'speaking' | 'story' | 'ipa' | 'writing';
+type TabKey = 'home' | 'create' | 'library' | 'game' | 'chatbot' | 'settings' | 'dictionary' | 'speaking' | 'story' | 'ipa' | 'writing' | 'admin';
 
 interface NavItem {
   key: TabKey;
@@ -29,12 +29,18 @@ const END_ANGLE = 80;
 interface GearSidebarProps {
   activeTab: TabKey;
   onTabChange: (tab: TabKey) => void;
+  isAdmin?: boolean;
 }
 
-const GearSidebar: React.FC<GearSidebarProps> = ({ activeTab, onTabChange }) => {
+const GearSidebar: React.FC<GearSidebarProps> = ({ activeTab, onTabChange, isAdmin = false }) => {
   const [isOpen, setIsOpen] = useState(false);
 
-  const itemCount = NAV_ITEMS.length;
+  const dynamicItems = [...NAV_ITEMS];
+  if (isAdmin) {
+    dynamicItems.push({ key: 'admin', label: 'Quản trị viên', emoji: '👑', color: 'from-amber-500 to-rose-600' });
+  }
+
+  const itemCount = dynamicItems.length;
   const angleStep = (END_ANGLE - START_ANGLE) / (itemCount - 1);
 
   const getItemPosition = (index: number) => {
@@ -59,7 +65,7 @@ const GearSidebar: React.FC<GearSidebarProps> = ({ activeTab, onTabChange }) => 
       <div className="fixed left-0 top-1/2 -translate-y-1/2 z-[999] no-print shadow-2xl">
 
       {/* Menu items */}
-      {NAV_ITEMS.map((item, index) => {
+      {dynamicItems.map((item, index) => {
         const pos = getItemPosition(index);
         const isActive = activeTab === item.key;
         const delay = index * 40;

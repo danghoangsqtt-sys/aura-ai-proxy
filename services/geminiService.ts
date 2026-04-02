@@ -1,309 +1,238 @@
 
-import { GoogleGenAI, Type, Modality } from "@google/genai";
-import { ExamConfig, Question, QuestionType, BloomLevel, VocabularyItem } from "../types";
-import { storage, STORAGE_KEYS } from "./storageAdapter";
+import { ExamConfig, Question, VocabularyItem } from "../types";
 import { AIConfigService } from "./aiConfigService";
 
-// Priority: AIConfigService (settings panel) → storageAdapter fallback → env var
-const getApiKey = async (): Promise<string> => {
-  // 1. Check AIConfigService first (where Settings panel saves)
-  const configKey = AIConfigService.getFreshConfig().geminiApiKey;
-  if (configKey) return configKey;
-  // 2. Fallback to old storage key for backward compatibility
-  const manualKey = await storage.get<string>(STORAGE_KEYS.API_KEY, '');
-  return manualKey || process.env.API_KEY || '';
-};
+// ═══════════════════════════════════════════════
+// Core: OpenAI-compatible Proxy Fetch
+// ═══════════════════════════════════════════════
 
-const cleanJsonResponse = (text: string): string => {
-  return text.replace(/```json/g, "").replace(/```/g, "").trim();
-};
+interface ProxyMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string | { type: string; [key: string]: any }[];
+}
 
-const handleGeminiError = (error: any): never => {
-  console.error("Gemini API Error:", error);
-  
-  // Kiểm tra lỗi 429 (Too Many Requests) hoặc RESOURCE_EXHAUSTED
-  if (error?.status === 429 || error?.message?.includes("429") || error?.message?.includes("RESOURCE_EXHAUSTED")) {
-    let retryMsg = "Bạn đã hết lượt gọi AI miễn phí trong phút này. Vui lòng thử lại sau 1 phút.";
-    
-    // Thử trích xuất retryDelay từ chi tiết lỗi (thường nằm trong error.details)
-    const retryDelay = error?.details?.[0]?.retryDelay;
-    if (retryDelay) {
-      // Chuyển đổi từ giây (ví dụ "60s") hoặc số sang giây
-      const seconds = typeof retryDelay === 'string' ? retryDelay.replace('s', '') : Math.ceil(retryDelay / 1000);
-      retryMsg = `Hệ thống đang quá tải. Vui lòng thử lại sau ${seconds} giây.`;
-    }
-    
-    throw new Error(retryMsg);
-  }
-
-  if (error?.message?.includes("API key not valid")) {
-    throw new Error("API Key không hợp lệ. Vui lòng kiểm tra lại trong phần Cài đặt.");
-  }
-  throw new Error(error?.message || "Hệ thống AI gặp sự cố. Vui lòng thử lại sau.");
-};
+interface ProxyRequestOptions {
+  model?: string;
+  temperature?: number;
+  response_format?: { type: 'json_object' | 'text' };
+  max_tokens?: number;
+}
 
 /**
- * Sinh ảnh minh họa cho từ vựng (Sử dụng cho game Vision Linker)
+ * Hàm fetch trung tâm — gọi CLIProxy theo chuẩn OpenAI API.
+ * Lỗi 401 → ném lỗi rõ ràng để UI nhắc người dùng đăng nhập.
  */
-export const generateVocabImage = async (word: string, meaning: string): Promise<string> => {
-  const apiKey = await getApiKey();
-  if (!apiKey) throw new Error("Cần API Key để sinh ảnh.");
-  
-  const ai = new GoogleGenAI({ apiKey });
-  // Sử dụng gemini-2.5-flash-image cho tốc độ và chất lượng tốt
-  const prompt = `A clear, simple, and high-quality educational illustration for the vocabulary word: "${word}" (meaning: ${meaning}). Style: Flat design, bright colors, white background, no text inside.`;
-  
+const proxyFetch = async (
+  messages: ProxyMessage[],
+  opts: ProxyRequestOptions = {}
+): Promise<string> => {
+  const cfg = AIConfigService.getFreshConfig();
+  const proxyUrl = cfg.proxyUrl?.replace(/\/$/, '') || 'http://localhost:8317';
+  const model = opts.model || cfg.model || 'gemini-2.5-flash';
+
+  const body = {
+    model,
+    messages,
+    temperature: opts.temperature ?? 0.7,
+    ...(opts.response_format ? { response_format: opts.response_format } : {}),
+    ...(opts.max_tokens ? { max_tokens: opts.max_tokens } : {}),
+  };
+
+  let res: Response;
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
-      contents: { parts: [{ text: prompt }] },
-      config: {
-        imageConfig: { aspectRatio: "1:1" }
-      }
+    res = await fetch(`${proxyUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     });
-
-    for (const part of response.candidates[0].content.parts) {
-      if (part.inlineData) {
-        return `data:image/png;base64,${part.inlineData.data}`;
-      }
-    }
-    throw new Error("Không tìm thấy dữ liệu ảnh.");
-  } catch (error) {
-    console.error("Image Gen Error:", error);
-    throw error;
+  } catch (networkError: any) {
+    throw new Error(`Không thể kết nối máy chủ AI (${proxyUrl}). Kiểm tra lại kết nối mạng.`);
   }
+
+  if (res.status === 401) {
+    throw new Error('UNAUTHORIZED: Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để tiếp tục.');
+  }
+
+  if (res.status === 429) {
+    throw new Error('Hệ thống AI đang quá tải. Vui lòng thử lại sau 1 phút.');
+  }
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Lỗi từ máy chủ AI (${res.status}): ${errText || 'Không xác định'}`);
+  }
+
+  const data = await res.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content) throw new Error('Phản hồi từ AI không hợp lệ hoặc rỗng.');
+  return content as string;
 };
 
 /**
- * Trích xuất từ vựng trực tiếp từ File (PDF hoặc Image)
+ * Fetch có đính kèm dữ liệu nhị phân (ảnh/audio) dưới dạng base64.
+ * Proxy nên hỗ trợ multipart content array theo chuẩn OpenAI vision.
  */
-export const extractVocabularyFromFile = async (base64Data: string, mimeType: string, topic: string): Promise<VocabularyItem[]> => {
-  const apiKey = await getApiKey();
-  if (!apiKey) throw new Error("Chưa cấu hình API Key trong phần Cài đặt.");
-  
-  const ai = new GoogleGenAI({ apiKey });
-  const model = 'gemini-2.5-flash'; // Bản 2.5 Flash ổn định — Free Tier quota cao nhất
+const proxyFetchWithMedia = async (
+  systemPrompt: string,
+  userText: string,
+  mediaBase64: string,
+  mimeType: string,
+  opts: ProxyRequestOptions = {}
+): Promise<string> => {
+  const messages: ProxyMessage[] = [
+    { role: 'system', content: systemPrompt },
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: userText },
+        { type: 'image_url', image_url: { url: `data:${mimeType};base64,${mediaBase64}` } },
+      ],
+    },
+  ];
+  return proxyFetch(messages, opts);
+};
 
-  const prompt = `
-    Đóng vai trò là một chuyên gia ngôn ngữ học và số hóa tài liệu.
-    Nhiệm vụ: Phân tích hình ảnh/tài liệu đính kèm để trích xuất danh sách từ vựng tiếng Anh.
-    Chủ đề gán cho các từ này là: "${topic}".
-    
-    Yêu cầu xử lý:
-    1. Tìm tất cả các từ vựng tiếng Anh có trong tài liệu.
-    2. Nếu tài liệu có cột phiên âm (IPA), hãy lấy chính xác. Nếu không, hãy tự động tạo IPA chuẩn Mỹ.
-    3. Nếu tài liệu có nghĩa tiếng Việt, hãy lấy nó. Nếu không, hãy dịch nghĩa phù hợp với ngữ cảnh phổ thông.
-    4. Xác định từ loại (n., v., adj., adv., v.v.).
-    5. Tạo một câu ví dụ ngắn gọn (example) chứa từ đó (nếu trong ảnh không có).
-    6. Bỏ qua các tiêu đề, số trang, hoặc rác. Chỉ lấy từ vựng.
+const cleanJson = (text: string): string =>
+  text.replace(/```json/g, '').replace(/```/g, '').trim();
 
-    Output format: JSON Array only.
-    Schema:
-    [
-      {
-        "id": "tạo_id_ngẫu_nhiên",
-        "word": "từ_gốc",
-        "pronunciation": "/ipa/",
-        "partOfSpeech": "từ_loại",
-        "meaning": "nghĩa_tiếng_việt",
-        "example": "Câu ví dụ.",
-        "topic": "${topic}"
-      }
-    ]
+// ═══════════════════════════════════════════════
+// Public Exports
+// ═══════════════════════════════════════════════
+
+/**
+ * Trích xuất từ vựng từ File (PDF hoặc Ảnh) qua proxy
+ */
+export const extractVocabularyFromFile = async (
+  base64Data: string,
+  mimeType: string,
+  topic: string
+): Promise<VocabularyItem[]> => {
+  const systemPrompt = 'Bạn là chuyên gia ngôn ngữ học. Trả về JSON array hợp lệ, không giải thích thêm.';
+  const userPrompt = `
+Phân tích hình ảnh/tài liệu đính kèm để trích xuất danh sách từ vựng tiếng Anh.
+Chủ đề: "${topic}".
+Yêu cầu:
+1. Lấy tất cả từ vựng tiếng Anh.
+2. Nếu có IPA trong tài liệu thì lấy chính xác, nếu không tự tạo IPA chuẩn Mỹ.
+3. Lấy nghĩa tiếng Việt, nếu không có thì dịch.
+4. Xác định từ loại (n., v., adj., adv.)
+5. Tạo câu ví dụ ngắn.
+Output: JSON Array only.
+Schema: [{ "id": "...", "word": "...", "pronunciation": "/ipa/", "partOfSpeech": "...", "meaning": "...", "example": "...", "topic": "${topic}" }]
   `;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: model,
-      contents: [{ parts: [{ text: prompt }, { inlineData: { data: base64Data, mimeType: mimeType } }] }],
-      config: { responseMimeType: "application/json" }
-    });
-    
-    const parsedData = JSON.parse(cleanJsonResponse(response.text));
-    
-    // Validate và chuẩn hóa dữ liệu trả về
-    return parsedData.map((item: any) => ({
-      ...item,
-      id: `vocab-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      topic: topic
-    })) as VocabularyItem[];
+  const raw = await proxyFetchWithMedia(systemPrompt, userPrompt, base64Data, mimeType, {
+    response_format: { type: 'json_object' },
+    temperature: 0.3,
+  });
 
-  } catch (error: any) {
-    console.error("Extract Error:", error);
-    throw new Error(error?.message || "Lỗi AI không thể đọc file.");
-  }
+  const parsed = JSON.parse(cleanJson(raw));
+  // Proxy có thể trả về { items: [...] } hoặc trực tiếp array
+  const arr: any[] = Array.isArray(parsed) ? parsed : parsed.items || parsed.vocabulary || [];
+  return arr.map((item: any) => ({
+    ...item,
+    id: `vocab-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    topic,
+  })) as VocabularyItem[];
 };
 
 /**
  * Trích xuất từ vựng từ văn bản thô
  */
 export const extractVocabFromText = async (text: string): Promise<any[]> => {
-  const apiKey = await getApiKey();
-  if (!apiKey) throw new Error("Chưa cấu hình API Key.");
-  
-  const ai = new GoogleGenAI({ apiKey });
-  const prompt = `
-    Đóng vai trò là một chuyên gia ngôn ngữ học. 
-    Nhiệm vụ: Phân tích đoạn văn bản sau và trích xuất khoảng 10-15 từ vựng quan trọng/học thuật nhất.
-    Yêu cầu:
-    1. Trả về đúng định dạng JSON Array.
-    2. Mỗi đối tượng gồm: { "word": "từ", "ipa": "/phiên_âm/", "meaning": "nghĩa_tiếng_việt", "pos": "n/v/adj/adv thối" }.
-    3. Ưu tiên các từ vựng học thuật phù hợp với ngữ cảnh.
+  const messages: ProxyMessage[] = [
+    { role: 'system', content: 'Bạn là chuyên gia ngôn ngữ học. Trả về JSON array hợp lệ.' },
+    {
+      role: 'user',
+      content: `Phân tích đoạn văn bản sau và trích xuất 10-15 từ vựng quan trọng nhất.
+Trả về đúng JSON Array: [{ "word": "...", "ipa": "/phiên_âm/", "meaning": "nghĩa_tiếng_việt", "pos": "n/v/adj/adv" }]
 
-    Văn bản: "${text}"
-  `;
+Văn bản: "${text}"`,
+    },
+  ];
 
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: { 
-        responseMimeType: "application/json",
-        temperature: 0.7 
-      }
-    });
-    
-    return JSON.parse(cleanJsonResponse(response.text));
-  } catch (error: any) {
-    handleGeminiError(error);
-  }
+  const raw = await proxyFetch(messages, { response_format: { type: 'json_object' }, temperature: 0.7 });
+  const parsed = JSON.parse(cleanJson(raw));
+  return Array.isArray(parsed) ? parsed : parsed.words || parsed.vocabulary || [];
 };
 
-
+/**
+ * Tạo đề thi (với retry 3 lần)
+ */
 export const generateExamContent = async (config: ExamConfig): Promise<Question[]> => {
-  const apiKey = await getApiKey();
-  const ai = new GoogleGenAI({ apiKey });
   let lastError: string | null = null;
 
   for (let attempt = 1; attempt <= 3; attempt++) {
-    const retryHeader = lastError ? `ĐÃ XẢY RA LỖI Ở LẦN THỬ TRƯỚC: ${lastError}\nHãy chắc chắn bạn trả về đúng JSON array hợp lệ theo schema.` : "";
-    
-    const prompt = `
-      ${retryHeader}
-      Đóng vai trò là một giáo viên bộ môn: ${config.subject}.
-      Nhiệm vụ: Tạo một đề thi trắc nghiệm/tự luận dưới dạng JSON.
-      
-      Thông tin đề thi:
-      - Chủ đề chính: ${config.topic}
-      - Môn học: ${config.subject}
-      - Tiêu đề: ${config.title}
-      
-      YÊU CẦU ĐẶC BIỆT TỪ NGƯỜI DÙNG (PROMPT):
-      "${config.customRequirement || "Tạo đề thi tổng hợp kiến thức tiêu chuẩn."}"
-      
-      Cấu trúc ma trận câu hỏi mong muốn (nếu Prompt không ghi đè):
-      ${JSON.stringify(config.sections)}
+    const retryHeader = lastError
+      ? `LỖI LẦN TRƯỚC: ${lastError}. Trả về JSON array hợp lệ theo schema.\n`
+      : '';
 
-      Yêu cầu đầu ra (Quan trọng):
-      1. Nội dung câu hỏi phải mới mẻ, sáng tạo, KHÔNG lặp lại các câu hỏi phổ thông nhàm chán.
-      2. Nếu môn học là Tiếng Anh, nội dung bằng tiếng Anh. Nếu là môn khác (Văn, Sử, Địa...), nội dung bằng Tiếng Việt.
-      3. Trả về đúng định dạng JSON Schema bên dưới.
-      4. "matchingLeft" và "matchingRight" chỉ dùng cho dạng câu hỏi MATCHING (Nối từ), để trống nếu là trắc nghiệm.
-    `;
-    
-    try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          temperature: 1.0, 
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                id: { type: Type.STRING },
-                type: { type: Type.STRING },
-                content: { type: Type.STRING },
-                options: { type: Type.ARRAY, items: { type: Type.STRING } },
-                matchingLeft: { type: Type.ARRAY, items: { type: Type.STRING } },
-                matchingRight: { type: Type.ARRAY, items: { type: Type.STRING } },
-                correctAnswer: { type: Type.STRING },
-                explanation: { type: Type.STRING },
-                bloomLevel: { type: Type.STRING },
-                points: { type: Type.NUMBER }
-              },
-              required: ["id", "content", "correctAnswer", "type", "bloomLevel"]
-            }
-          }
-        }
-      });
-      return JSON.parse(cleanJsonResponse(response.text)) as Question[];
-    } catch (error: any) { 
-      console.warn(`[Gemini Retry] Thất bại lần ${attempt}:`, error.message);
-      lastError = error.message;
-      if (attempt === 3) {
-        console.error("Generate Exam Error after 3 attempts:", error);
-        throw error;
-      }
-    }
-  }
-  throw new Error("Không thể tạo nội dung đề thi sau nhiều lần thử.");
-};
+    const prompt = `${retryHeader}Đóng vai trò là giáo viên môn: ${config.subject}.
+Tạo một đề thi trắc nghiệm/tự luận dưới dạng JSON.
 
-export const regenerateSingleQuestion = async (config: ExamConfig, oldQuestion: Question): Promise<Question> => {
-  const apiKey = await getApiKey();
-  const ai = new GoogleGenAI({ apiKey });
-  let lastError: string | null = null;
+Thông tin đề thi:
+- Chủ đề: ${config.topic}
+- Môn học: ${config.subject}
+- Tiêu đề: ${config.title}
+- Yêu cầu: "${config.customRequirement || 'Tạo đề thi tổng hợp tiêu chuẩn.'}"
+- Ma trận: ${JSON.stringify(config.sections)}
 
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    const retryPrefix = lastError ? `LỖI LẦN TRƯỚC: ${lastError}. Hãy thử lại và chỉ trả về 1 JSON object duy nhất.\n` : "";
-    const prompt = `${retryPrefix}Tạo một câu hỏi ${config.subject} mới thay thế cho câu hỏi cũ này: "${oldQuestion.content}".
-      Yêu cầu:
-      - Loại câu hỏi: ${oldQuestion.type}
-      - Mức độ Bloom: ${oldQuestion.bloomLevel}
-      - Chủ đề chính: ${config.topic}
-      - Yêu cầu bổ sung: ${config.customRequirement}
-      Trả về một đối tượng JSON câu hỏi duy nhất.`;
+Yêu cầu đầu ra:
+1. Nội dung sáng tạo, không lặp câu hỏi nhàm chán.
+2. Tiếng Anh nếu môn Tiếng Anh, Tiếng Việt nếu môn khác.
+3. Trả về JSON Array với schema: [{ "id": "...", "type": "...", "content": "...", "options": [...], "matchingLeft": [...], "matchingRight": [...], "correctAnswer": "...", "explanation": "...", "bloomLevel": "...", "points": 0 }]`;
+
+    const messages: ProxyMessage[] = [
+      { role: 'system', content: 'Bạn là giáo viên chuyên nghiệp. Trả về JSON array hợp lệ, không giải thích.' },
+      { role: 'user', content: prompt },
+    ];
 
     try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          temperature: 1.0,
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              id: { type: Type.STRING },
-              type: { type: Type.STRING },
-              content: { type: Type.STRING },
-              options: { type: Type.ARRAY, items: { type: Type.STRING } },
-              matchingLeft: { type: Type.ARRAY, items: { type: Type.STRING } },
-              matchingRight: { type: Type.ARRAY, items: { type: Type.STRING } },
-              correctAnswer: { type: Type.STRING },
-              explanation: { type: Type.STRING },
-              bloomLevel: { type: Type.STRING },
-              points: { type: Type.NUMBER }
-            },
-            required: ["id", "content", "correctAnswer", "type", "bloomLevel"]
-          }
-        }
-      });
-      return JSON.parse(cleanJsonResponse(response.text)) as Question;
+      const raw = await proxyFetch(messages, { response_format: { type: 'json_object' }, temperature: 1.0 });
+      const parsed = JSON.parse(cleanJson(raw));
+      const arr: any[] = Array.isArray(parsed) ? parsed : parsed.questions || parsed.items || [];
+      return arr as Question[];
     } catch (error: any) {
-      console.warn(`[Gemini Regenerate Retry] Lần ${attempt}:`, error.message);
+      console.warn(`[Proxy Exam Retry] Lần ${attempt}:`, error.message);
       lastError = error.message;
       if (attempt === 3) throw error;
     }
   }
-  throw new Error("Không thể tái tạo câu hỏi.");
+  throw new Error('Không thể tạo đề thi sau nhiều lần thử.');
 };
 
-export const analyzeLanguage = async (text: string): Promise<DictionaryResponse> => {
-  const apiKey = await getApiKey();
-  const ai = new GoogleGenAI({ apiKey });
-  const prompt = `Phân tích từ/câu: "${text}"`;
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: prompt,
-    config: { responseMimeType: "application/json" }
-  });
-  return JSON.parse(cleanJsonResponse(response.text)) as DictionaryResponse;
+/**
+ * Tái tạo một câu hỏi đơn
+ */
+export const regenerateSingleQuestion = async (config: ExamConfig, oldQuestion: Question): Promise<Question> => {
+  let lastError: string | null = null;
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const prefix = lastError ? `LỖI LẦN TRƯỚC: ${lastError}. Chỉ trả về 1 JSON object.\n` : '';
+    const prompt = `${prefix}Tạo một câu hỏi ${config.subject} mới thay thế cho: "${oldQuestion.content}".
+- Loại: ${oldQuestion.type}, Bloom: ${oldQuestion.bloomLevel}, Chủ đề: ${config.topic}
+Trả về một JSON object: { "id": "...", "type": "...", "content": "...", "options": [...], "correctAnswer": "...", "explanation": "...", "bloomLevel": "...", "points": 0 }`;
+
+    const messages: ProxyMessage[] = [
+      { role: 'system', content: 'Bạn là giáo viên chuyên nghiệp. Trả về JSON object duy nhất.' },
+      { role: 'user', content: prompt },
+    ];
+
+    try {
+      const raw = await proxyFetch(messages, { response_format: { type: 'json_object' }, temperature: 1.0 });
+      return JSON.parse(cleanJson(raw)) as Question;
+    } catch (error: any) {
+      console.warn(`[Proxy Regen Retry] Lần ${attempt}:`, error.message);
+      lastError = error.message;
+      if (attempt === 3) throw error;
+    }
+  }
+  throw new Error('Không thể tái tạo câu hỏi.');
 };
 
+/**
+ * Phân tích ngôn ngữ từ/câu
+ */
 export interface DictionaryResponse {
   type: 'word' | 'phrase' | 'sentence' | 'not_found';
   word?: string;
@@ -316,283 +245,136 @@ export interface DictionaryResponse {
   usageNotes?: string;
 }
 
-export const generateMacaronicStory = async (wordList: string, topic: string, baseLanguage: 'vi' | 'en' = 'vi'): Promise<{story: string, vocabulary: {word: string, meaning: string, pos?: string, ipa?: string, example?: string, synonyms?: string[]}[]}> => {
-  const apiKey = await getApiKey();
-  if (!apiKey) throw new Error("Chưa cấu hình API Key. Vui lòng kiểm tra lại trong phần Cài đặt.");
-
-  const ai = new GoogleGenAI({ apiKey });
-  const isViBase = baseLanguage === 'vi';
-
-  const prompt = `
-Bạn là chuyên gia viết "Truyện Chêm" (Macaronic Story) để giúp người học ngôn ngữ.
-
-NHIỆM VỤ: Viết câu chuyện ngắn 200-300 từ về chủ đề "${topic}".
-
-DANH SÁCH TỪ VỰNG BẮT BUỘC PHẢI CHÊM: ${wordList}
-
-QUY TẮC QUAN TRỌNG NHẤT:
-${isViBase ? `
-- Viết câu chuyện bằng TIẾNG VIỆT, nhưng CHÊM các từ TIẾNG ANH ở trên vào thay thế cho từ tiếng Việt tương ứng.
-- Mỗi từ tiếng Anh phải được bọc trong thẻ <b>...</b>.
-- KHÔNG dịch các từ tiếng Anh ra tiếng Việt trong truyện. Giữ nguyên từ tiếng Anh.
-
-VÍ DỤ MẪU (nếu từ vựng là: resilient, journey, discover):
-"Minh là một chàng trai rất <b>resilient</b>, dù gặp bao khó khăn anh vẫn không bỏ cuộc. Một ngày nọ, anh bắt đầu một <b>journey</b> dài đến vùng đất mới. Tại đó, anh <b>discover</b> ra những điều kỳ diệu mà mình chưa từng biết."
-` : `
-- Viết câu chuyện bằng TIẾNG ANH, nhưng CHÊM nghĩa TIẾNG VIỆT của các từ vào thay thế cho từ tiếng Anh tương ứng.
-- Mỗi từ tiếng Việt được chêm phải được bọc trong thẻ <b>...</b>.
-
-VÍ DỤ MẪU (nếu từ vựng là: kiên cường, hành trình, khám phá):
-"Minh was a very <b>kiên cường</b> young man who never gave up. One day, he started a long <b>hành trình</b> to a new land. There, he would <b>khám phá</b> wonderful things he had never known."
-`}
-
-BẮT BUỘC:
-1. Sử dụng TẤT CẢ các từ trong danh sách, KHÔNG bỏ sót từ nào.
-2. Các từ chêm phải nằm TỰ NHIÊN trong câu, có ngữ cảnh rõ ràng để người đọc đoán được nghĩa.
-3. KHÔNG giải thích nghĩa của từ trong truyện.
-4. BẮT BUỘC bọc từ chêm trong thẻ <b>...</b>.
-
-Trả về JSON với ĐÚNG format sau:
-{
-  "story": "Nội dung câu chuyện có chêm từ trong thẻ <b>...</b>",
-  "vocabulary": [
-    {
-      "word": "từ_tiếng_anh",
-      "meaning": "nghĩa_tiếng_việt",
-      "pos": "noun/verb/adj/adv",
-      "ipa": "/phiên_âm_IPA/",
-      "example": "Một câu ví dụ sử dụng từ này trong tiếng Anh",
-      "synonyms": ["từ_đồng_nghĩa_1", "từ_đồng_nghĩa_2"]
-    }
-  ]
-}
-
-Trường "vocabulary" BẮT BUỘC liệt kê TẤT CẢ các từ với đầy đủ thông tin: word, meaning, pos, ipa, example, synonyms.
-`;
-
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: { 
-        responseMimeType: "application/json",
-        temperature: 0.8,
-        topP: 0.9
-      }
-    });
-
-    if (!response || !response.text) {
-      throw new Error("Dữ liệu trả về không hợp lệ.");
-    }
-    
-    return JSON.parse(cleanJsonResponse(response.text)) as {story: string, vocabulary: {word: string, meaning: string, pos?: string, ipa?: string, example?: string, synonyms?: string[]}[]};
-  } catch (error: any) {
-    console.error("Internal Macaronic Story Error:", error);
-    throw new Error(error?.message || "Hệ thống đang quá tải hoặc gặp sự cố kỹ thuật. Vui lòng thử lại sau giây lát.");
-  }
+export const analyzeLanguage = async (text: string): Promise<DictionaryResponse> => {
+  const messages: ProxyMessage[] = [
+    { role: 'system', content: 'Bạn là từ điển song ngữ Anh-Việt. Trả về JSON object hợp lệ.' },
+    { role: 'user', content: `Phân tích từ/câu: "${text}". Trả về JSON với schema DictionaryResponse.` },
+  ];
+  const raw = await proxyFetch(messages, { response_format: { type: 'json_object' }, temperature: 0.2 });
+  return JSON.parse(cleanJson(raw)) as DictionaryResponse;
 };
 
 /**
- * Phòng Luyện Viết (Writing Master) - JSON structured evaluation
+ * Sinh truyện chêm từ vựng (Macaronic Story)
+ */
+export const generateMacaronicStory = async (
+  wordList: string,
+  topic: string,
+  baseLanguage: 'vi' | 'en' = 'vi'
+): Promise<{ story: string; vocabulary: { word: string; meaning: string; pos?: string; ipa?: string; example?: string; synonyms?: string[] }[] }> => {
+  const isViBase = baseLanguage === 'vi';
+
+  const prompt = `Bạn là chuyên gia viết "Truyện Chêm" (Macaronic Story).
+
+NHIỆM VỤ: Viết câu chuyện 200-300 từ về chủ đề "${topic}".
+DANH SÁCH TỪ BẮT BUỘC: ${wordList}
+
+${isViBase ? `
+QUY TẮC: Viết bằng TIẾNG VIỆT, chêm từ TIẾNG ANH. Bọc từ chêm trong <b>...</b>.
+VÍ DỤ (từ: resilient, journey): "Minh là chàng trai <b>resilient</b>. Anh bắt đầu một <b>journey</b> dài..."
+` : `
+QUY TẮC: Viết bằng TIẾNG ANH, chêm nghĩa TIẾNG VIỆT. Bọc từ chêm trong <b>...</b>.
+VÍ DỤ (từ: kiên cường, hành trình): "Minh was <b>kiên cường</b>. He began a long <b>hành trình</b>..."
+`}
+
+BẮT BUỘC: Dùng TẤT CẢ từ trong danh sách. Từ chêm phải tự nhiên.
+
+Trả về JSON:
+{
+  "story": "Nội dung với từ chêm trong <b>...</b>",
+  "vocabulary": [{ "word": "...", "meaning": "...", "pos": "...", "ipa": "/ipa/", "example": "...", "synonyms": ["..."] }]
+}`;
+
+  const messages: ProxyMessage[] = [
+    { role: 'system', content: 'Bạn là nhà văn ngôn ngữ học. Trả về JSON object hợp lệ.' },
+    { role: 'user', content: prompt },
+  ];
+
+  const raw = await proxyFetch(messages, { response_format: { type: 'json_object' }, temperature: 0.8 });
+  return JSON.parse(cleanJson(raw));
+};
+
+/**
+ * Chấm bài viết tiếng Anh (Writing Evaluator)
  */
 export interface WritingEvaluation {
-  cefrLevel: string;       // A1, A2, B1, B2, C1, C2
-  bandScore: number;       // 0-100
-  overallFeedback: string; // Nhận xét chung
+  cefrLevel: string;
+  bandScore: number;
+  overallFeedback: string;
   grammarErrors: { error: string; fix: string; explanation: string }[];
   vocabUpgrades: { original: string; upgraded: string; example: string }[];
   structureFeedback: string;
-  modelEssay: string;      // Bài viết mẫu cấp độ cao hơn
+  modelEssay: string;
   advancedVocab: { word: string; meaning: string; pos: string; example: string }[];
   advancedSentences: { pattern: string; example: string }[];
 }
 
-const WRITING_EVAL_PROMPT = (text: string) => `You are an expert IELTS/CEFR Writing Examiner. Evaluate this English text and return a STRICT JSON object.
+const WRITING_EVAL_SYSTEM = 'You are an expert IELTS/CEFR Writing Examiner. Return ONLY valid JSON object.';
+
+const WRITING_EVAL_PROMPT = (text: string) => `Evaluate this English text and return a JSON object:
 
 USER TEXT:
 """
 ${text}
 """
 
-Return EXACTLY this JSON schema (no markdown, no explanation):
+Schema:
 {
   "cefrLevel": "<A1|A2|B1|B2|C1|C2>",
   "bandScore": <0-100>,
-  "overallFeedback": "<2-3 sentence overall assessment in Vietnamese>",
-  "grammarErrors": [
-    {"error": "<exact wrong text>", "fix": "<corrected text>", "explanation": "<brief explanation in Vietnamese>"}
-  ],
-  "vocabUpgrades": [
-    {"original": "<basic word used>", "upgraded": "<advanced alternative>", "example": "<sentence using the upgraded word>"}
-  ],
-  "structureFeedback": "<feedback on essay structure, coherence, paragraphing in Vietnamese>",
-  "modelEssay": "<rewrite the user's text at ONE CEFR LEVEL HIGHER. Use more sophisticated vocabulary, better transitions, and more complex sentence structures. Keep the same topic and ideas.>",
-  "advancedVocab": [
-    {"word": "<advanced word>", "meaning": "<Vietnamese meaning>", "pos": "<noun/verb/adj/adv>", "example": "<English sentence>"}
-  ],
-  "advancedSentences": [
-    {"pattern": "<sentence pattern name>", "example": "<example using the pattern>"}
-  ]
+  "overallFeedback": "<2-3 sentence assessment in Vietnamese>",
+  "grammarErrors": [{"error": "...", "fix": "...", "explanation": "..."}],
+  "vocabUpgrades": [{"original": "...", "upgraded": "...", "example": "..."}],
+  "structureFeedback": "<Vietnamese>",
+  "modelEssay": "<rewrite at one CEFR level higher>",
+  "advancedVocab": [{"word": "...", "meaning": "<Vietnamese>", "pos": "...", "example": "..."}],
+  "advancedSentences": [{"pattern": "...", "example": "..."}]
 }
 
-RULES:
-- grammarErrors: List ALL grammar/spelling mistakes found (max 10)
-- vocabUpgrades: Suggest 5-8 vocabulary upgrades from basic to advanced
-- modelEssay: Must be the SAME topic but written at one level higher (e.g., if user is B1, write at B2)
-- advancedVocab: List 8-12 useful advanced words related to the topic
-- advancedSentences: List 5-8 advanced sentence patterns the user can use
-- All explanations and meanings in Vietnamese
-- Return ONLY raw JSON`;
+RULES: grammarErrors max 10, vocabUpgrades 5-8, advancedVocab 8-12, advancedSentences 5-8. Return ONLY raw JSON.`;
 
 export const evaluateWritingStructured = async (textInput: string): Promise<WritingEvaluation> => {
-  const apiKey = await getApiKey();
-
-  if (apiKey) {
-    try {
-      const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: WRITING_EVAL_PROMPT(textInput),
-        config: {
-          responseMimeType: 'application/json',
-          temperature: 0.2
-        }
-      });
-      return JSON.parse(cleanJsonResponse(response.text || '')) as WritingEvaluation;
-    } catch (err: any) {
-      console.error('[Gemini Writing Eval] Error:', err);
-      // Fallthrough to Ollama
-    }
-  }
-
-  // Ollama fallback
-  try {
-    const { OllamaService } = await import('./ollamaService');
-    const history = [{ role: 'system' as const, content: 'You are an English writing examiner. Return ONLY valid JSON.' }];
-    const result = await OllamaService.sendChatMessage(history, WRITING_EVAL_PROMPT(textInput));
-    const cleaned = result.replace(/```json/g, '').replace(/```/g, '').trim();
-    const match = cleaned.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]) as WritingEvaluation;
-    throw new Error('Invalid Ollama response');
-  } catch (err: any) {
-    console.error('[Ollama Writing Eval] Error:', err);
-    throw new Error('Không thể chấm bài. Kiểm tra kết nối AI.');
-  }
+  const messages: ProxyMessage[] = [
+    { role: 'system', content: WRITING_EVAL_SYSTEM },
+    { role: 'user', content: WRITING_EVAL_PROMPT(textInput) },
+  ];
+  const raw = await proxyFetch(messages, { response_format: { type: 'json_object' }, temperature: 0.2 });
+  return JSON.parse(cleanJson(raw)) as WritingEvaluation;
 };
 
 /**
- * AI sinh 10 đề luyện viết hàng tuần — đa dạng thể loại và CEFR level
+ * Sinh 10 đề luyện viết hàng tuần
  */
 import { WritingTopic } from '../types';
 
-const WRITING_TOPICS_PROMPT = `You are an expert IELTS/CEFR writing topic designer. Generate EXACTLY 10 diverse English writing practice topics for a weekly practice session.
+const WRITING_TOPICS_PROMPT = `You are an IELTS/CEFR writing topic designer.
+Generate EXACTLY 10 diverse English writing practice topics.
 
-REQUIREMENTS:
-- Mix task types: 2 essays, 2 letters, 2 emails, 2 reports, 2 reviews
-- Mix CEFR levels: 2×A2, 2×B1, 3×B2, 2×C1, 1×C2
-- Topics should be practical, modern, and interesting (technology, environment, education, work, travel, health, culture, social issues)
-- Each topic must have 3 useful tips in Vietnamese
-- Word count hints should match the CEFR level
+Requirements:
+- Mix: 2 essays, 2 letters, 2 emails, 2 reports, 2 reviews
+- CEFR mix: 2×A2, 2×B1, 3×B2, 2×C1, 1×C2
+- Modern, practical topics
+- Each topic has 3 tips in Vietnamese
+- Word count: A2=80-120, B1=120-180, B2=180-250, C1=250-350, C2=300-400
 
-Return ONLY a JSON array with EXACTLY this schema:
-[
-  {
-    "id": "topic_1",
-    "prompt": "<the full writing prompt in English, 2-3 sentences>",
-    "taskType": "<essay|letter|email|report|review>",
-    "cefrTarget": "<A2|B1|B2|C1|C2>",
-    "wordCountHint": "<e.g. 80-120 words>",
-    "tips": ["<tip in Vietnamese>", "<tip in Vietnamese>", "<tip in Vietnamese>"]
-  }
-]
-
-RULES:
-- id must be "topic_1" through "topic_10"
-- Prompts must be clear and specific, giving students a clear direction
-- Tips should be practical writing advice in Vietnamese
-- Word count hints: A2=80-120, B1=120-180, B2=180-250, C1=250-350, C2=300-400
-- NO duplicate topics or themes
-- Return ONLY raw JSON array`;
+Return JSON object: { "topics": [ { "id": "topic_1", "prompt": "...", "taskType": "essay|letter|email|report|review", "cefrTarget": "...", "wordCountHint": "...", "tips": ["...", "...", "..."] } ] }
+No duplicate topics. Return ONLY raw JSON.`;
 
 export const generateWritingTopics = async (): Promise<WritingTopic[]> => {
-  const apiKey = await getApiKey();
-
-  if (apiKey) {
-    try {
-      const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: WRITING_TOPICS_PROMPT,
-        config: {
-          responseMimeType: 'application/json',
-          temperature: 0.9
-        }
-      });
-      const topics = JSON.parse(cleanJsonResponse(response.text || '')) as WritingTopic[];
-      if (Array.isArray(topics) && topics.length >= 5) return topics;
-      throw new Error('Invalid topic count');
-    } catch (err: any) {
-      console.error('[Gemini Writing Topics] Error:', err);
-      // Fallthrough to Ollama
-    }
-  }
-
-  // Ollama fallback
-  try {
-    const { OllamaService } = await import('./ollamaService');
-    const history = [{ role: 'system' as const, content: 'You are a writing topic generator. Return ONLY valid JSON array.' }];
-    const result = await OllamaService.sendChatMessage(history, WRITING_TOPICS_PROMPT);
-    const cleaned = result.replace(/```json/g, '').replace(/```/g, '').trim();
-    const match = cleaned.match(/\[[\s\S]*\]/);
-    if (match) {
-      const topics = JSON.parse(match[0]) as WritingTopic[];
-      if (Array.isArray(topics) && topics.length >= 5) return topics;
-    }
-    throw new Error('Invalid Ollama response');
-  } catch (err: any) {
-    console.error('[Ollama Writing Topics] Error:', err);
-    throw new Error('Không thể tạo đề luyện viết. Kiểm tra kết nối AI.');
-  }
+  const messages: ProxyMessage[] = [
+    { role: 'system', content: 'You are a writing topic generator. Return ONLY valid JSON.' },
+    { role: 'user', content: WRITING_TOPICS_PROMPT },
+  ];
+  const raw = await proxyFetch(messages, { response_format: { type: 'json_object' }, temperature: 0.9 });
+  const parsed = JSON.parse(cleanJson(raw));
+  const arr: any[] = Array.isArray(parsed) ? parsed : parsed.topics || [];
+  if (arr.length < 5) throw new Error('Không đủ đề luyện viết. Thử lại.');
+  return arr as WritingTopic[];
 };
 
 /**
- * Phân tích cấu tạo từ (Word Formation) - Tiền tố, Gốc từ, Hậu tố
+ * Phân tích cấu tạo từ (Word Formation)
  */
-export const analyzeWordFormation = async (word: string): Promise<WordFormationResponse> => {
-  const apiKey = await getApiKey();
-  if (!apiKey) throw new Error("Chưa cấu hình API Key trong phần Cài đặt.");
-
-  const ai = new GoogleGenAI({ apiKey });
-
-  const prompt = `Act as an expert linguist. Analyze the word: '${word}'. 
-  Break it down into prefix, root, and suffix. If a part doesn't exist, return null.
-  Provide 3 related words in the same word family.
-  Must return strictly in JSON format matching this schema:
-  {
-    "word": "string",
-    "prefix": { "morpheme": "string", "meaning": "string" } | null,
-    "root": { "morpheme": "string", "meaning": "string" },
-    "suffix": { "morpheme": "string", "meaning": "string" } | null,
-    "family": ["string", "string", "string"]
-  }`;
-
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: { 
-        responseMimeType: "application/json",
-        temperature: 0.1 
-      }
-    });
-    
-    return JSON.parse(cleanJsonResponse(response.text)) as WordFormationResponse;
-  } catch (error: any) {
-    console.error("Word Formation Error:", error);
-    throw new Error(error?.message || "Hệ thống AI gặp sự cố khi phân tích cấu tạo từ.");
-  }
-};
-
 export interface WordFormationResponse {
   word: string;
   prefix: { morpheme: string; meaning: string } | null;
@@ -601,62 +383,45 @@ export interface WordFormationResponse {
   family: string[];
 }
 
-/**
- * Sinh Sơ đồ tư duy từ vựng (Vocab Mind Map)
- */
-export const generateVocabMindMap = async (topic: string): Promise<VocabMindMapResponse> => {
-  const apiKey = await getApiKey();
-  if (!apiKey) throw new Error("Chưa cấu hình API Key trong phần Cài đặt.");
-
-  const ai = new GoogleGenAI({ apiKey });
-
-  const prompt = `Act as an English vocabulary expert. Generate a mind map for the topic: '${topic}'.
-  Categorize the vocabulary into 3 to 4 branches (e.g., Types, Causes, Solutions, Adjectives).
-  Each branch should have 3 to 5 related English words with their Vietnamese meanings and a fitting emoji.
-  Must return STRICTLY in JSON format matching this schema:
-  {
-    "centralTopic": "string",
-    "centralEmoji": "string",
-    "branches": [
-      {
-        "categoryName": "string",
-        "words": [
-          { "word": "string", "meaning": "string", "emoji": "string" }
-        ]
-      }
-    ]
-  }`;
-
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: { 
-        responseMimeType: "application/json",
-        temperature: 0.7 
-      }
-    });
-    
-    return JSON.parse(cleanJsonResponse(response.text)) as VocabMindMapResponse;
-  } catch (error: any) {
-    console.error("Vocab Mind Map Error:", error);
-    throw new Error(error?.message || "Hệ thống AI gặp sự cố khi sinh sơ đồ tư duy.");
-  }
+export const analyzeWordFormation = async (word: string): Promise<WordFormationResponse> => {
+  const messages: ProxyMessage[] = [
+    { role: 'system', content: 'You are an expert linguist. Return ONLY valid JSON.' },
+    {
+      role: 'user',
+      content: `Analyze the word: '${word}'. Break into prefix, root, suffix (null if absent). Include 3 related words.
+JSON Schema: { "word": "...", "prefix": { "morpheme": "...", "meaning": "..." } | null, "root": { "morpheme": "...", "meaning": "..." }, "suffix": { "morpheme": "...", "meaning": "..." } | null, "family": ["...", "...", "..."] }`,
+    },
+  ];
+  const raw = await proxyFetch(messages, { response_format: { type: 'json_object' }, temperature: 0.1 });
+  return JSON.parse(cleanJson(raw)) as WordFormationResponse;
 };
 
+/**
+ * Sinh sơ đồ tư duy từ vựng (Vocab Mind Map)
+ */
 export interface VocabMindMapResponse {
   centralTopic: string;
   centralEmoji: string;
-  branches: {
-    categoryName: string;
-    words: { word: string; meaning: string; emoji: string }[];
-  }[];
+  branches: { categoryName: string; words: { word: string; meaning: string; emoji: string }[] }[];
 }
 
-// ═══════════════════════════════════════════════
-// Pronunciation Analysis — IPA Clinic (Record & Analyze)
-// ═══════════════════════════════════════════════
+export const generateVocabMindMap = async (topic: string): Promise<VocabMindMapResponse> => {
+  const messages: ProxyMessage[] = [
+    { role: 'system', content: 'You are an English vocabulary expert. Return ONLY valid JSON.' },
+    {
+      role: 'user',
+      content: `Generate a vocabulary mind map for topic: '${topic}'.
+3-4 branches, each with 3-5 words with Vietnamese meanings and emoji.
+JSON Schema: { "centralTopic": "...", "centralEmoji": "...", "branches": [{ "categoryName": "...", "words": [{ "word": "...", "meaning": "...", "emoji": "..." }] }] }`,
+    },
+  ];
+  const raw = await proxyFetch(messages, { response_format: { type: 'json_object' }, temperature: 0.7 });
+  return JSON.parse(cleanJson(raw)) as VocabMindMapResponse;
+};
 
+/**
+ * Phân tích phát âm từ audio blob
+ */
 export interface PronunciationFeedback {
   score: number;
   transcription: string;
@@ -664,95 +429,110 @@ export interface PronunciationFeedback {
   advice: string;
 }
 
-/**
- * Phân tích phát âm từ audio blob — dùng Gemini REST API (KHÔNG WebSocket)
- * Fallback: Ollama STT → text comparison
- */
-export const analyzePronunciation = async (
-  audioBlob: Blob,
-  targetText: string
-): Promise<PronunciationFeedback> => {
-  const apiKey = await getApiKey();
-
-  // Convert blob to base64
+export const analyzePronunciation = async (audioBlob: Blob, targetText: string): Promise<PronunciationFeedback> => {
   const arrayBuffer = await audioBlob.arrayBuffer();
   const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
   const mimeType = audioBlob.type || 'audio/webm';
 
-  if (apiKey) {
-    // ═══ Gemini Path ═══
-    try {
-      const ai = new GoogleGenAI({ apiKey });
-      const prompt = `You are an expert English pronunciation coach. Listen to the attached audio carefully.
-The user is trying to say: "${targetText}".
+  const systemPrompt = 'You are an expert English pronunciation coach. Return ONLY valid JSON.';
+  const userPrompt = `The user is trying to say: "${targetText}". Listen to the audio and evaluate pronunciation.
+Return JSON: { "score": <0-100>, "transcription": "<what you heard>", "errors": ["<error1>"], "advice": "<one tip>" }
+Scoring: 90-100 native, 70-89 good, 50-69 noticeable errors, 30-49 hard to understand. Return ONLY raw JSON.`;
 
-Evaluate their pronunciation and return a JSON object EXACTLY like this:
-{
-  "score": <number 0-100>,
-  "transcription": "<what you actually heard the user say>",
-  "errors": ["<specific error 1>", "<specific error 2>"],
-  "advice": "<one clear tip on how to improve>"
+  const raw = await proxyFetchWithMedia(systemPrompt, userPrompt, base64, mimeType, { temperature: 0.1 });
+  return JSON.parse(cleanJson(raw)) as PronunciationFeedback;
+};
+
+/**
+ * Sinh ảnh minh họa từ vựng — NOTE: Cần proxy hỗ trợ image generation endpoint
+ */
+export const generateVocabImage = async (word: string, meaning: string): Promise<string> => {
+  // Image generation qua text-to-image endpoint nếu proxy hỗ trợ
+  // Fallback: trả về placeholder URL để UI không bị crash
+  const messages: ProxyMessage[] = [
+    { role: 'system', content: 'You are a helpful assistant.' },
+    {
+      role: 'user',
+      content: `Describe a simple educational illustration for the word "${word}" (meaning: ${meaning}) in one sentence suitable for image generation. Style: flat design, bright colors, white background.`,
+    },
+  ];
+
+  try {
+    const cfg = AIConfigService.getFreshConfig();
+    const proxyUrl = cfg.proxyUrl?.replace(/\/$/, '') || 'http://localhost:8317';
+
+    // Thử gọi image generation endpoint nếu proxy hỗ trợ
+    const res = await fetch(`${proxyUrl}/v1/images/generations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gemini-2.5-flash-image',
+        prompt: `Educational illustration of "${word}" (${meaning}). Flat design, bright colors, white background, no text.`,
+        n: 1,
+        size: '512x512',
+        response_format: 'b64_json',
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      const b64 = data?.data?.[0]?.b64_json;
+      if (b64) return `data:image/png;base64,${b64}`;
+    }
+  } catch {
+    // Fallthrough to placeholder
+  }
+
+  // Placeholder nếu endpoint không hỗ trợ
+  return `https://placehold.co/512x512/E0E7FF/4F46E5?text=${encodeURIComponent(word)}`;
+};
+
+// ═══════════════════════════════════════════════
+// Chatbot: sendChatMessage (dùng cho ChatbotPanel)
+// ═══════════════════════════════════════════════
+
+export interface ChatMessage {
+  role: 'user' | 'model' | 'system';
+  content: string;
 }
 
-Scoring guide:
-- 90-100: Native-like, perfect
-- 70-89: Good, minor issues
-- 50-69: Understandable but noticeable errors
-- 30-49: Difficult to understand
-- 0-29: Very poor or unintelligible
+const AURA_SYSTEM_PROMPT = `Bạn là Aura — một gia sư AI thông minh, thân thiện và chuyên sâu về giáo dục.
+Nhiệm vụ của bạn là hỗ trợ học sinh và giáo viên trong việc học tập và giảng dạy tiếng Anh.
+Trả lời súc tích, rõ ràng, dùng tiếng Việt hoặc tiếng Anh tùy ngữ cảnh người hỏi.
+Khi giải thích ngữ pháp hoặc từ vựng, hãy kèm ví dụ cụ thể.`;
 
-If no audio is detected or too short, give score 0.
-Return ONLY raw JSON. No markdown, no explanation.`;
+/**
+ * Gửi tin nhắn trong Chatbot và nhận phản hồi từ proxy
+ */
+export const sendChatMessage = async (history: ChatMessage[], newMessage: string): Promise<string> => {
+  const messages: ProxyMessage[] = [
+    { role: 'system', content: AURA_SYSTEM_PROMPT },
+    ...history.map(m => ({
+      role: (m.role === 'model' ? 'assistant' : 'user') as 'user' | 'assistant',
+      content: m.content,
+    })),
+    { role: 'user', content: newMessage },
+  ];
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: [{
-          parts: [
-            { text: prompt },
-            { inlineData: { data: base64, mimeType } }
-          ]
-        }],
-        config: {
-          responseMimeType: 'application/json',
-          temperature: 0.1
-        }
-      });
+  const cfg = AIConfigService.getFreshConfig();
+  const proxyUrl = cfg.proxyUrl?.replace(/\/$/, '') || 'http://localhost:8317';
+  const model = cfg.model || 'gemini-2.5-flash';
 
-      const cleaned = cleanJsonResponse(response.text || '');
-      return JSON.parse(cleaned) as PronunciationFeedback;
-    } catch (err: any) {
-      console.error('[Gemini Pronunciation] Error:', err);
-      // Fallthrough to Ollama
-    }
-  }
-
-  // ═══ Ollama Fallback: STT → text comparison ═══
+  let res: Response;
   try {
-    const { OllamaService } = await import('./ollamaService');
-    const transcription = await OllamaService.speechToText(base64);
-
-    if (!transcription.trim()) {
-      return { score: 0, transcription: '', errors: ['Không nghe thấy giọng nói'], advice: 'Hãy nói to và rõ hơn.' };
-    }
-
-    // Use Ollama to compare
-    const comparePrompt = `Compare these two texts and score pronunciation accuracy as JSON:
-Target: "${targetText}"
-Heard: "${transcription}"
-Return: {"score": <0-100>, "transcription": "${transcription}", "errors": ["..."], "advice": "..."}
-Raw JSON only.`;
-
-    const history = [{ role: 'system' as const, content: 'You are a pronunciation evaluator. Return only JSON.' }];
-    const result = await OllamaService.sendChatMessage(history, comparePrompt);
-    const cleaned = result.replace(/```json/g, '').replace(/```/g, '').trim();
-    const match = cleaned.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]) as PronunciationFeedback;
-
-    // Simple fallback
-    const similarity = targetText.toLowerCase().trim() === transcription.toLowerCase().trim() ? 90 : 40;
-    return { score: similarity, transcription, errors: similarity < 90 ? ['Phát âm chưa khớp'] : [], advice: 'Nghe mẫu và thử lại.' };
-  } catch (err: any) {
-    console.error('[Ollama Pronunciation Fallback] Error:', err);
-    throw new Error('Không thể phân tích phát âm. Kiểm tra kết nối AI.');
+    res = await fetch(`${proxyUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, messages, temperature: 0.8 }),
+    });
+  } catch {
+    throw new Error(`Không thể kết nối máy chủ AI (${proxyUrl}).`);
   }
+
+  if (res.status === 401) throw new Error('UNAUTHORIZED: Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.');
+  if (res.status === 429) throw new Error('Hệ thống AI đang quá tải. Thử lại sau 1 phút.');
+  if (!res.ok) throw new Error(`Lỗi máy chủ AI (${res.status})`);
+
+  const data = await res.json();
+  return data?.choices?.[0]?.message?.content || 'Aura không có phản hồi.';
 };

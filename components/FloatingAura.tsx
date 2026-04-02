@@ -74,34 +74,41 @@ const FloatingAura: React.FC<FloatingAuraProps> = ({ isCinematic, onExitCinemati
       
       {/* 1. Nhân vật Aura (The Anchor) */}
       <div 
-        className={`cursor-pointer drop-shadow-[0_10px_25px_rgba(0,0,0,0.3)] transition-all duration-500 relative z-10 translate-y-[28%] hover:scale-105 pointer-events-auto shrink-0 w-48 h-64 md:w-56 md:h-72`}
+        className={`cursor-pointer drop-shadow-[0_10px_25px_rgba(0,0,0,0.3)] transition-all duration-500 relative z-10 translate-y-[45%] hover:scale-105 pointer-events-auto shrink-0 w-64 h-80 md:w-72 md:h-96`}
         onClick={() => currentMode !== 'speaking_room' && setShowMenu(!showMenu)}
       >
         {/* Radial Menu - Gắn chặt với Nhân vật */}
         {showMenu && currentMode !== 'speaking_room' && (
-          <div className="absolute bottom-[85%] right-0 w-[260px] h-[130px] pointer-events-none z-50">
-            {/* Nút 1: Trò chuyện */}
-            <button onClick={handleLiveVoice} className="absolute bottom-0 left-0 pointer-events-auto w-16 h-16 rounded-full border-2 border-[#E4C564] bg-slate-900/80 backdrop-blur-md text-white flex items-center justify-center hover:shadow-[0_0_15px_rgba(228,197,100,0.8)] transition-all hover:scale-110 group shadow-2xl" title="Trò chuyện">
-              <span className="text-2xl">🎙️</span>
-              <span className="absolute -bottom-8 w-max text-xs font-bold text-[#E4C564] opacity-0 group-hover:opacity-100 transition-opacity">Trò chuyện</span>
-            </button>
-            {/* Nút 2: Gia sư */}
-            <button 
-              onClick={() => { if (connected) handleDisconnect(); setShowMenu(false); setCurrentMode('tutor'); }} 
-              className="absolute top-0 left-1/2 -translate-x-1/2 pointer-events-auto w-16 h-16 rounded-full border-2 border-[#E4C564] bg-slate-900/80 backdrop-blur-md text-white flex items-center justify-center hover:shadow-[0_0_15px_rgba(228,197,100,0.8)] transition-all hover:scale-110 group shadow-2xl"
-              title="Gia sư"
-            >
-              <span className="text-2xl">💬</span>
-              <span className="absolute -bottom-8 w-max text-xs font-bold text-[#E4C564] opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">Gia sư Aura</span>
-            </button>
-            {/* Nút 3: Luyện nói */}
+          <div className="absolute bottom-[48%] right-[70%] flex flex-col gap-3 pointer-events-none z-50">
+            {/* Nút 1: Luyện nói (Top - Xuất hiện sau cùng) */}
             <button 
               onClick={() => { if (connected) handleDisconnect(); setShowMenu(false); window.dispatchEvent(new CustomEvent('NAVIGATE_TAB', { detail: 'speaking' })); }} 
-              className="absolute bottom-0 right-0 pointer-events-auto w-16 h-16 rounded-full border-2 border-[#E4C564] bg-slate-900/80 backdrop-blur-md text-white flex items-center justify-center hover:shadow-[0_0_15px_rgba(228,197,100,0.8)] transition-all hover:scale-110 group shadow-2xl"
+              className="relative pointer-events-auto w-10 h-10 rounded-full border border-[#E4C564] bg-slate-900/80 backdrop-blur-md text-white flex items-center justify-center hover:shadow-[0_0_10px_rgba(228,197,100,0.8)] transition-all hover:scale-110 group shadow-lg animate-in fade-in slide-in-from-bottom-4 duration-500 fill-mode-both"
+              style={{ animationDelay: '200ms' }}
               title="Luyện nói"
             >
-              <span className="text-2xl">🎓</span>
-              <span className="absolute -bottom-8 right-0 w-max text-xs font-bold text-[#E4C564] opacity-0 group-hover:opacity-100 transition-opacity text-right">Luyện nói</span>
+              <span className="text-sm">🎓</span>
+              <span className="absolute right-full mr-3 top-1/2 -translate-y-1/2 w-max text-[10px] font-bold text-[#E4C564] opacity-0 group-hover:opacity-100 transition-opacity text-right">Luyện nói</span>
+            </button>
+            {/* Nút 2: Gia sư (Middle) */}
+            <button 
+              onClick={() => { if (connected) handleDisconnect(); setShowMenu(false); setCurrentMode('tutor'); }} 
+              className="relative pointer-events-auto w-10 h-10 rounded-full border border-[#E4C564] bg-slate-900/80 backdrop-blur-md text-white flex items-center justify-center hover:shadow-[0_0_10px_rgba(228,197,100,0.8)] transition-all hover:scale-110 group shadow-lg animate-in fade-in slide-in-from-bottom-4 duration-500 fill-mode-both"
+              style={{ animationDelay: '100ms' }}
+              title="Gia sư"
+            >
+              <span className="text-sm">💬</span>
+              <span className="absolute right-full mr-3 top-1/2 -translate-y-1/2 w-max text-[10px] font-bold text-[#E4C564] opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">Gia sư Aura</span>
+            </button>
+            {/* Nút 3: Trò chuyện (Bottom - Xuất hiện đầu tiên) */}
+            <button 
+              onClick={handleLiveVoice} 
+              className="relative pointer-events-auto w-10 h-10 rounded-full border border-[#E4C564] bg-slate-900/80 backdrop-blur-md text-white flex items-center justify-center hover:shadow-[0_0_10px_rgba(228,197,100,0.8)] transition-all hover:scale-110 group shadow-lg animate-in fade-in slide-in-from-bottom-4 duration-500 fill-mode-both" 
+              style={{ animationDelay: '0ms' }}
+              title="Trò chuyện"
+            >
+              <span className="text-sm">🎙️</span>
+              <span className="absolute right-full mr-3 top-1/2 -translate-y-1/2 w-max text-[10px] font-bold text-[#E4C564] opacity-0 group-hover:opacity-100 transition-opacity">Trò chuyện</span>
             </button>
           </div>
         )}
@@ -154,9 +161,9 @@ const FloatingAura: React.FC<FloatingAuraProps> = ({ isCinematic, onExitCinemati
         <div className={`absolute inset-0 bg-indigo-500/20 blur-[60px] rounded-full z-[-1] transition-opacity duration-1000 ${isActuallySpeaking ? 'opacity-100 scale-125' : 'opacity-30'}`}></div>
       </div>
 
-      {/* 2. Compact Chat Widget (Pushed to the RIGHT of character) */}
+      {/* 2. Compact Chat Widget (Pushed closer to the character to remove unused transparent space) */}
       {currentMode === 'tutor' && (
-        <div className="pointer-events-auto pb-8 animate-in slide-in-from-left-8 fade-in duration-500 ease-out origin-bottom-left">
+        <div className="pointer-events-auto pb-8 -ml-16 md:-ml-24 animate-in slide-in-from-left-8 fade-in duration-500 ease-out origin-bottom-left">
            <ChatbotPanel onClose={() => setCurrentMode('dashboard')} />
         </div>
       )}

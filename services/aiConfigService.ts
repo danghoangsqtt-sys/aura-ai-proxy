@@ -3,20 +3,20 @@
  * Manages AI_PROVIDER (gemini/ollama), SELECTED_MODEL, and API key storage.
  */
 
-export type AIProvider = 'gemini' | 'ollama';
+export type AIProvider = 'gemini';
 
 export interface AIConfig {
   provider: AIProvider;
   model: string;
-  geminiApiKey: string;
+  proxyUrl: string;
 }
 
 const STORAGE_KEY = 'aura_ai_config';
 
 const DEFAULT_CONFIG: AIConfig = {
-  provider: 'ollama',
-  model: 'llama3.2:1b',
-  geminiApiKey: ''
+  provider: 'gemini',
+  model: 'gemini-2.5-flash',
+  proxyUrl: import.meta.env.VITE_PROXY_URL || 'http://localhost:8317'
 };
 
 export class AIConfigService {
@@ -50,8 +50,8 @@ export class AIConfigService {
     return this.getConfig().model;
   }
 
-  static getGeminiApiKey(): string {
-    return this.getConfig().geminiApiKey;
+  static getProxyUrl(): string {
+    return this.getConfig().proxyUrl;
   }
 
   /**
@@ -73,8 +73,7 @@ export class AIConfigService {
 
   static isConfigured(): boolean {
     const cfg = this.getConfig();
-    if (cfg.provider === 'gemini') return !!cfg.geminiApiKey;
-    return !!cfg.model;
+    return !!cfg.proxyUrl;
   }
 
   static reset(): void {

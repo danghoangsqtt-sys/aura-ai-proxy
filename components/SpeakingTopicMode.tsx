@@ -1,12 +1,18 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { SpeakingQuestion, SpeakingFeedback } from '../types';
-import { OllamaService } from '../services/ollamaService';
 import { AIConfigService } from '../services/aiConfigService';
-import { evaluateSpeakingSession, generateSpeakingQuestions as geminiGenerateSpeaking } from '../services/speakingService';
+import { evaluateSpeakingSession, generateSpeakingQuestions } from '../services/speakingService';
 import { SpeakingImageService } from '../services/speakingImageService';
 import { storage, STORAGE_KEYS } from '../services/storageAdapter';
 import { defaultTopicBank } from '../data/speakingTopicData';
+import { OfflineTTSService } from '../services/offlineTTSService';
+import Live2DAvatar from './Live2DAvatar';
+import { EyeState, AppMode } from '../types';
+import { 
+  Mic, MicOff, ChevronLeft, Sparkles, Brain, Award, 
+  MessageSquare, Volume2, Info, ArrowRight, Home, RefreshCcw
+} from 'lucide-react';
 
 interface Props {
   onBack: () => void;
@@ -53,6 +59,12 @@ const SpeakingTopicMode: React.FC<Props> = ({ onBack }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [feedback, setFeedback] = useState<SpeakingFeedback | null>(null);
   
+  // Aura State
+  const [auraState, setAuraState] = useState<EyeState>(EyeState.IDLE);
+  const [auraVolume, setAuraVolume] = useState(0);
+  const [isAuraTalking, setIsAuraTalking] = useState(false);
+  const tts = OfflineTTSService.getInstance();
+
   // Manual Add Form
   const [showAddForm, setShowAddForm] = useState(false);
   const [newQ, setNewQ] = useState({ question: '', sampleAnswer: '', topic: '', imageUrl: '' });
@@ -89,6 +101,34 @@ const SpeakingTopicMode: React.FC<Props> = ({ onBack }) => {
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingStartRef = useRef<number>(0);
 
+  // Aura Say helper
+  const auraSay = useCallback((text: string, onEnd?: () => void) => {
+    setIsAuraTalking(true);
+    setAuraState(EyeState.SPEAKING);
+    tts.speak(
+      text,
+      (vol) => setAuraVolume(vol),
+      () => {
+        setIsAuraTalking(false);
+        setAuraState(EyeState.IDLE);
+        if (onEnd) onEnd();
+      }
+    );
+  }, [tts]);
+
+  // Handle auto-speak on question change
+  useEffect(() => {
+    if (view === 'practice' && practiceQs[currentQIndex]) {
+      const q = practiceQs[currentQIndex];
+      // Speak the lead-in then the question
+      const leadIn = currentQIndex === 0 ? "Alright, let's start. " : "Next question. ";
+      setTimeout(() => {
+        auraSay(leadIn + q.question);
+      }, 500);
+    }
+    return () => tts.stop();
+  }, [view, currentQIndex, practiceQs, auraSay, tts]);
+
   useEffect(() => {
     const initData = async () => {
       // Load Topic Bank (with default seed)
@@ -121,22 +161,8 @@ const SpeakingTopicMode: React.FC<Props> = ({ onBack }) => {
     setIsGenerating(true);
     setGeneratedQs([]);
     try {
-      const provider = AIConfigService.getProvider();
-      let qs: SpeakingQuestion[];
-
-      if (provider === 'gemini') {
-        qs = await geminiGenerateSpeaking(selectedTopic, selectedLevel);
-      } else {
-        const raw = await OllamaService.generateSpeakingQuestions(selectedTopic, selectedLevel);
-        qs = raw.map((q: any, idx: number) => ({
-          id: `ai-speak-${Date.now()}-${idx}`,
-          question: q.question || '',
-          sampleAnswer: q.sampleAnswer || q.answer || '',
-          topic: selectedTopic,
-          difficulty: q.difficulty || selectedLevel,
-        }));
-      }
-
+      const qs = await generateSpeakingQuestions(selectedTopic, selectedLevel);
+      
       // Auto-save to bank
       const validQs = qs.filter(q => q.question?.trim());
       if (validQs.length > 0) {
@@ -319,18 +345,15 @@ const SpeakingTopicMode: React.FC<Props> = ({ onBack }) => {
           const base64Audio = (reader.result as string).split(',')[1];
           try {
             const currentQ = practiceQs[currentQIndex];
-            const provider = AIConfigService.getProvider();
 
             let result: SpeakingFeedback;
-            if (provider === 'gemini') {
-              // Gemini: gửi audio trực tiếp, bypass STT
-              result = await evaluateSpeakingSession(currentQ.question, base64Audio, currentQ.sampleAnswer);
-            } else {
-              // Ollama: STT trước → evaluate bằng text
-              const transcription = await OllamaService.speechToText(base64Audio);
-              result = await OllamaService.evaluateSpeaking(currentQ.question, transcription);
-            }
+            result = await evaluateSpeakingSession(currentQ.question, base64Audio, currentQ.sampleAnswer);
+            
             setFeedback(result);
+            
+            // Aura speaks the feedback
+            const feedbackText = `You got ${result.score} points. ${result.score >= 80 ? 'Excellent work!' : 'Good job, but you can improve.'}`;
+            auraSay(feedbackText);
           } catch (err: any) {
             console.error('[SpeakingTopic] Evaluation error:', err);
             alert('⚠️ Lỗi phân tích AI. Vui lòng nói to và rõ ràng hơn, sau đó thử lại.');
@@ -388,19 +411,27 @@ const SpeakingTopicMode: React.FC<Props> = ({ onBack }) => {
             <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">{topicBank.length} câu hỏi · {bankTopics.length} chủ đề</p>
           </div>
         </div>
-        <div className="flex-1 p-8 flex items-center justify-center">
+        <div className="flex-1 p-8 flex items-center justify-center bg-slate-50/50">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl w-full">
-            <button onClick={() => setView('generator')} className="group bg-emerald-50 border-2 border-emerald-100 hover:border-emerald-500 hover:bg-emerald-100 p-6 rounded-2xl text-left transition-all shadow-lg active:scale-95">
-               <div className="w-12 h-12 bg-emerald-500 text-white rounded-xl flex items-center justify-center text-2xl mb-4 shadow-xl shadow-emerald-200 group-hover:scale-110 transition-transform">⚡</div>
-               <h3 className="text-xl font-black text-emerald-900 uppercase mb-1">AI Generator</h3>
-               <p className="text-xs font-medium text-emerald-700">Tạo câu hỏi mới từ chủ đề & trình độ CEFR.</p>
+            <button 
+              onClick={() => setView('generator')} 
+              className="group bg-white border-2 border-slate-100 hover:border-emerald-500 hover:shadow-2xl hover:shadow-emerald-100 p-8 rounded-[32px] text-left transition-all active:scale-95"
+              title="Mở trình tạo câu hỏi AI"
+            >
+               <div className="w-14 h-14 bg-emerald-500 text-white rounded-2xl flex items-center justify-center text-2xl mb-6 shadow-xl shadow-emerald-200 group-hover:scale-110 group-hover:rotate-6 transition-all">⚡</div>
+               <h3 className="text-2xl font-black text-slate-800 uppercase mb-2">AI Generator</h3>
+               <p className="text-xs font-bold text-slate-400 leading-relaxed uppercase tracking-wider">Tạo câu hỏi mới từ chủ đề & trình độ CEFR tự động.</p>
             </button>
-            <button onClick={() => setView('library')} className="group bg-indigo-50 border-2 border-indigo-100 hover:border-indigo-500 hover:bg-indigo-100 p-6 rounded-2xl text-left transition-all shadow-lg active:scale-95 relative">
-               <div className="w-12 h-12 bg-indigo-600 text-white rounded-xl flex items-center justify-center text-2xl mb-4 shadow-xl shadow-indigo-200 group-hover:scale-110 transition-transform">📂</div>
-               <h3 className="text-xl font-black text-indigo-900 uppercase mb-1">Question Bank</h3>
-               <p className="text-xs font-medium text-indigo-700">Kho lưu trữ câu hỏi chủ đề. Luyện tập lại bất cứ lúc nào.</p>
+            <button 
+              onClick={() => setView('library')} 
+              className="group bg-white border-2 border-slate-100 hover:border-indigo-500 hover:shadow-2xl hover:shadow-indigo-100 p-8 rounded-[32px] text-left transition-all active:scale-95 relative"
+              title="Mở kho câu hỏi"
+            >
+               <div className="w-14 h-14 bg-indigo-600 text-white rounded-2xl flex items-center justify-center text-2xl mb-6 shadow-xl shadow-indigo-200 group-hover:scale-110 group-hover:-rotate-6 transition-all">📂</div>
+               <h3 className="text-2xl font-black text-slate-800 uppercase mb-2">Question Bank</h3>
+               <p className="text-xs font-bold text-slate-400 leading-relaxed uppercase tracking-wider">Kho lưu trữ câu hỏi chủ đề. Luyện tập lại bất cứ lúc nào.</p>
                {topicBank.length > 0 && (
-                 <span className="absolute top-3 right-3 px-2 py-1 bg-indigo-600 text-white text-[10px] font-black rounded-full">{topicBank.length}</span>
+                 <span className="absolute top-6 right-6 px-3 py-1 bg-indigo-600 text-white text-[10px] font-black rounded-full shadow-lg">{topicBank.length}</span>
                )}
             </button>
           </div>
@@ -662,95 +693,243 @@ const SpeakingTopicMode: React.FC<Props> = ({ onBack }) => {
     );
   }
 
-  // === PRACTICE MODE ===
+  // === PRACTICE MODE (UPGRADED WITH AURA) ===
   if (view === 'practice') {
-     const currentQ = practiceQs[currentQIndex];
-     return (
-        <div className="h-full flex flex-col bg-white">
-          <div className="bg-slate-50 border-b px-6 py-4 flex items-center justify-between">
-            <button onClick={() => setView('library')} className="p-2 bg-white border rounded-xl hover:bg-slate-100" title="Quay lại"><svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg></button>
-            <h2 className="text-lg font-black text-slate-800 uppercase">Luyện tập ({currentQIndex + 1}/{practiceQs.length})</h2>
-            <div className="w-10"></div>
+    const currentQ = practiceQs[currentQIndex];
+    
+    return (
+      <div className="h-full flex flex-col bg-slate-50 overflow-hidden font-sans">
+        {/* Style injection for animations */}
+        <style dangerouslySetInnerHTML={{ __html: `
+          @keyframes wave-up {
+            0% { height: 10px; }
+            50% { height: 35px; }
+            100% { height: 10px; }
+          }
+          .voice-bar {
+            width: 3px;
+            background: #6366f1;
+            border-radius: 10px;
+            animation: wave-up 1s ease-in-out infinite;
+          }
+        `}} />
+
+        {/* ═══ Header ═══ */}
+        <div className="bg-white/80 backdrop-blur-md border-b px-6 py-4 flex items-center justify-between shrink-0 z-10">
+          <button 
+            onClick={() => { tts.stop(); setView('library'); }}
+            className="p-2.5 bg-slate-100/50 text-slate-500 rounded-2xl hover:bg-slate-200/50 hover:text-slate-800 transition-all flex items-center gap-2 group"
+            title="Quay lại thư viện"
+          >
+            <ChevronLeft className="w-5 h-5 group-hover:-translate-x-0.5 transition-transform" />
+            <Home className="w-4 h-4" />
+          </button>
+          
+          <div className="text-center">
+            <div className="flex items-center gap-2 justify-center">
+              <Sparkles className="w-4 h-4 text-amber-500 fill-amber-500" />
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-[3px]">Aura Speaking Lab</span>
+            </div>
+            <h2 className="text-sm font-black text-slate-800 uppercase tracking-tight">Question {currentQIndex + 1} <span className="text-slate-300">/ {practiceQs.length}</span></h2>
           </div>
-          <div className="flex-1 flex flex-col items-center justify-center p-6 bg-slate-50/30">
-            <div className="w-full max-w-2xl space-y-8 animate-in zoom-in duration-300">
-               <div className="text-center space-y-4">
-                  <span className="inline-block px-3 py-1 bg-emerald-100 text-emerald-600 rounded-full text-[9px] font-black uppercase tracking-widest">{currentQ.topic || 'Chủ đề'}</span>
-                  {currentQ.imageUrl && (
-                    <div className="flex justify-center">
-                      <img src={getImageSrc(currentQ.imageUrl)} alt="Question" className="max-w-md max-h-72 object-contain rounded-2xl border-2 border-slate-200 shadow-lg" />
+
+          <div className="flex bg-indigo-50 px-3 py-1.5 rounded-full border border-indigo-100 items-center gap-2 shadow-sm">
+             <Brain className="w-3.5 h-3.5 text-indigo-500" />
+             <span className="text-[10px] font-black text-indigo-600 uppercase">{currentQ.difficulty || 'Expert'}</span>
+          </div>
+        </div>
+
+        {/* ═══ Main Area ═══ */}
+        <div className="flex-1 flex overflow-hidden">
+          
+          {/* Left: Aura Avatar */}
+          <div className="w-[450px] shrink-0 relative bg-gradient-to-b from-indigo-50/30 to-white flex items-center justify-center border-r border-slate-100 overflow-hidden">
+            <div className="absolute inset-0 opacity-20 pointer-events-none overflow-hidden">
+               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-indigo-200 rounded-full blur-[120px] animate-pulse"></div>
+            </div>
+
+            <div className="w-full h-full relative z-10 scale-105 translate-y-10 group overflow-hidden">
+              <Live2DAvatar 
+                state={auraState} 
+                mode={AppMode.VOICE} 
+                volume={auraVolume} 
+              />
+            </div>
+
+            {/* Status indicator bubble */}
+            {isRecording && (
+              <div className="absolute top-10 right-10 bg-rose-500 text-white px-4 py-2 rounded-2xl shadow-xl shadow-rose-200 font-black text-[10px] uppercase tracking-widest flex items-center gap-2 animate-bounce">
+                <div className="w-2 h-2 bg-white rounded-full animate-ping" />
+                Aura is listening...
+              </div>
+            )}
+          </div>
+
+          {/* Right: Interaction Panel */}
+          <div className="flex-1 flex flex-col bg-slate-50/50 relative overflow-hidden">
+            
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-10 flex flex-col items-center justify-center">
+              
+              {/* Question Card */}
+              <div className="w-full max-w-xl space-y-8">
+                
+                {!feedback ? (
+                  <div className="space-y-6 text-center animate-in fade-in slide-in-from-bottom-5 duration-700">
+                    <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-indigo-600 text-white rounded-full text-[10px] font-black uppercase tracking-widest shadow-lg shadow-indigo-200">
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      Topic: {currentQ.topic || 'General'}
                     </div>
-                  )}
-                  <h3 className="text-3xl md:text-4xl font-black text-slate-800 leading-tight">{currentQ.question}</h3>
-                  {currentQ.sampleAnswer && (
-                    <div className="mt-4 p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 inline-block max-w-lg">
-                      <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">Gợi ý</p>
-                      <p className="text-sm text-indigo-800 italic">"{currentQ.sampleAnswer}"</p>
+
+                    <div className="relative">
+                      {currentQ.imageUrl && (
+                        <div className="mb-6 flex justify-center">
+                          <img 
+                            src={getImageSrc(currentQ.imageUrl)} 
+                            alt="Visual Aid" 
+                            className="max-h-60 rounded-[32px] border-4 border-white shadow-2xl object-contain animate-in zoom-in duration-500" 
+                          />
+                        </div>
+                      )}
+                      <h3 className="text-4xl font-black text-slate-800 leading-[1.2] px-4 font-serif">
+                        "{currentQ.question}"
+                      </h3>
                     </div>
-                  )}
+
+                    {currentQ.sampleAnswer && (
+                      <div className="p-4 bg-white/60 backdrop-blur-sm border border-white rounded-3xl shadow-sm inline-block max-w-[80%] mx-auto">
+                         <div className="flex items-center gap-2 justify-center mb-1.5 opacity-40">
+                           <Info className="w-3.5 h-3.5" />
+                           <span className="text-[9px] font-black uppercase tracking-widest">Aura's Hint</span>
+                         </div>
+                         <p className="text-slate-500 text-sm italic font-medium">"{currentQ.sampleAnswer}"</p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  /* Feedback View */
+                  <div className="space-y-6 animate-in slide-in-from-bottom-8 duration-500">
+                    <div className="bg-white rounded-[40px] p-8 shadow-2xl shadow-indigo-100/50 border border-indigo-50/50 overflow-hidden relative">
+                      {/* Score Badge */}
+                      <div className="absolute top-6 right-6">
+                         <div className={`w-20 h-20 rounded-3xl flex flex-col items-center justify-center shadow-2xl ${
+                           feedback.score >= 80 ? 'bg-emerald-500 shadow-emerald-200' :
+                           feedback.score >= 50 ? 'bg-indigo-600 shadow-indigo-200' : 
+                           'bg-rose-500 shadow-rose-200'
+                         }`}>
+                           <span className="text-[9px] text-white/70 font-black uppercase mb-1">Score</span>
+                           <span className="text-3xl font-black text-white leading-none">{feedback.score}</span>
+                         </div>
+                      </div>
+
+                      <div className="flex items-center gap-3 mb-8">
+                         <div className="p-3 bg-indigo-50 rounded-2xl">
+                           <Award className="w-6 h-6 text-indigo-600" />
+                         </div>
+                         <div>
+                           <h4 className="text-xl font-black text-slate-800 uppercase leading-none tracking-tight">Evaluation Result</h4>
+                           <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase">Reviewed by Aura Tutor</p>
+                         </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div className="bg-slate-50/80 p-4 rounded-3xl border border-slate-100">
+                           <div className="flex items-center gap-2 mb-2 opacity-50">
+                             <Volume2 className="w-3.5 h-3.5" />
+                             <span className="text-[9px] font-black uppercase tracking-widest">Transcription</span>
+                           </div>
+                           <p className="text-slate-700 text-sm italic font-medium leading-relaxed">"{feedback.transcription}"</p>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="bg-rose-50/50 p-4 rounded-3xl border border-rose-100">
+                             <span className="text-[9px] font-black text-rose-500 uppercase tracking-widest block mb-2">Pronunciation</span>
+                             <p className="text-[11px] text-slate-700 leading-relaxed font-bold">{feedback.pronunciation}</p>
+                          </div>
+                          <div className="bg-amber-50/50 p-4 rounded-3xl border border-amber-100">
+                             <span className="text-[9px] font-black text-amber-600 uppercase tracking-widest block mb-2">Grammar & Vocab</span>
+                             <p className="text-[11px] text-slate-700 leading-relaxed font-bold">{feedback.grammar}</p>
+                          </div>
+                        </div>
+
+                        <div className="bg-emerald-50/70 p-5 rounded-3xl border border-emerald-100 relative group overflow-hidden">
+                           <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+                             <Sparkles className="w-12 h-12 text-emerald-600" />
+                           </div>
+                           <span className="text-[9px] font-black text-emerald-600 uppercase tracking-widest block mb-2">Aura's Suggested Version</span>
+                           <p className="text-base text-emerald-900 font-bold leading-relaxed pr-8">"{feedback.betterVersion}"</p>
+                        </div>
+                      </div>
+
+                      <button 
+                        onClick={nextQuestion} 
+                        className="w-full mt-8 py-5 bg-slate-900 text-white rounded-[24px] font-black text-xs uppercase tracking-[4px] hover:bg-indigo-600 hover:shadow-2xl hover:shadow-indigo-200 transition-all flex items-center justify-center gap-3 active:scale-95 group"
+                        title={currentQIndex === practiceQs.length - 1 ? 'Hoàn thành' : 'Câu tiếp theo'}
+                      >
+                        {currentQIndex === practiceQs.length - 1 ? 'Finish Challenge' : 'Next Question'}
+                        <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* UI: Controls Area */}
+            <div className={`absolute bottom-0 left-0 right-0 p-10 shrink-0 flex flex-col items-center gap-4 transition-all duration-500 ${feedback ? 'translate-y-full opacity-0' : 'translate-y-0 opacity-100'}`}>
+               
+               {/* Sound visualizer dots when recording */}
+               {isRecording && (
+                 <div className="flex items-center gap-1.5 h-10 mb-2">
+                    {[...Array(12)].map((_, i) => (
+                      <div 
+                        key={i} 
+                        className="voice-bar shadow-sm" 
+                        style={{ 
+                          animationDelay: `${i * 0.1}s`,
+                          height: `${Math.random() * 20 + 10}px` 
+                        }} 
+                      />
+                    ))}
+                 </div>
+               )}
+
+               <div className="flex items-center gap-6">
+                 <button 
+                    onClick={isRecording ? stopRecording : startRecording}
+                    disabled={isProcessing || isAuraTalking}
+                    className={`group relative w-24 h-24 rounded-[36px] flex items-center justify-center transition-all duration-500 ${
+                      isRecording 
+                      ? 'bg-rose-500 shadow-2xl shadow-rose-200 rotate-90 scale-110 active:scale-95' 
+                      : isProcessing || isAuraTalking
+                        ? 'bg-slate-200 text-slate-400 cursor-not-allowed scale-90'
+                        : 'bg-white shadow-2xl shadow-indigo-100 hover:shadow-indigo-200 border-2 border-indigo-50 hover:scale-110 hover:-rotate-6 active:scale-90 overflow-hidden'
+                    }`}
+                    title={isRecording ? 'Dừng ghi âm' : 'Bắt đầu ghi âm'}
+                 >
+                   {!isRecording && !isProcessing && !isAuraTalking && (
+                     <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                   )}
+                   
+                   {isProcessing ? (
+                     <div className="flex flex-col items-center justify-center">
+                        <RefreshCcw className="w-8 h-8 text-indigo-500 animate-spin" />
+                     </div>
+                   ) : isRecording ? (
+                     <MicOff className="w-10 h-10 text-white" />
+                   ) : (
+                     <Mic className={`w-10 h-10 ${isAuraTalking ? 'text-slate-400' : 'text-indigo-600'}`} />
+                   )}
+                 </button>
                </div>
 
-               {feedback && (
-                  <div className="bg-white rounded-2xl p-6 shadow-2xl border border-indigo-50 animate-in slide-in-from-bottom-4">
-                    <div className="flex items-center gap-4 mb-6">
-                        <div className={`w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-black text-white shadow-lg ${feedback.score >= 80 ? 'bg-emerald-500 shadow-emerald-200' : feedback.score >= 50 ? 'bg-amber-500 shadow-amber-200' : 'bg-rose-500 shadow-rose-200'}`}>{feedback.score}</div>
-                        <div>
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Đánh giá</p>
-                          <h4 className="text-xl font-bold text-slate-800">{feedback.score >= 80 ? 'Tuyệt vời!' : feedback.score >= 50 ? 'Khá tốt!' : 'Cần cố gắng!'}</h4>
-                        </div>
-                    </div>
-                    <div className="space-y-3">
-                       <div className="bg-slate-50 p-3 rounded-xl">
-                         <p className="text-[9px] font-black text-slate-400 uppercase mb-0.5">Nghe được</p>
-                         <p className="text-sm text-slate-600 italic">"{feedback.transcription}"</p>
-                       </div>
-                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                         <div className="bg-rose-50 p-3 rounded-xl border border-rose-100">
-                           <p className="text-[9px] font-black text-rose-500 uppercase mb-0.5">Phát âm</p>
-                           <p className="text-xs text-slate-600">{feedback.pronunciation}</p>
-                         </div>
-                         <div className="bg-amber-50 p-3 rounded-xl border border-amber-100">
-                           <p className="text-[9px] font-black text-amber-600 uppercase mb-0.5">Ngữ pháp</p>
-                           <p className="text-xs text-slate-600">{feedback.grammar}</p>
-                         </div>
-                       </div>
-                       <div className="bg-emerald-50 p-3 rounded-xl border border-emerald-100">
-                         <p className="text-[9px] font-black text-emerald-600 uppercase mb-0.5">Phiên bản tốt hơn</p>
-                         <p className="text-sm text-emerald-800 italic font-bold">"{feedback.betterVersion}"</p>
-                       </div>
-                    </div>
-                    <button onClick={nextQuestion} className="w-full mt-6 py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-600 transition-all">Câu tiếp theo</button>
-                  </div>
-               )}
-
-               {!feedback && (
-                  <div className="flex flex-col items-center gap-6">
-                    <button 
-                      onClick={isRecording ? stopRecording : startRecording}
-                      disabled={isProcessing}
-                      className={`relative w-24 h-24 rounded-full flex items-center justify-center transition-all ${
-                        isRecording 
-                        ? 'bg-rose-500 shadow-[0_0_30px_rgba(244,63,94,0.6)] scale-110' 
-                        : 'bg-indigo-600 hover:bg-indigo-700 shadow-xl shadow-indigo-200'
-                      }`}
-                      title={isRecording ? 'Nhấn để dừng' : 'Nhấn để nói'}
-                    >
-                      {isRecording && <div className="absolute inset-0 rounded-full border-4 border-white opacity-30 animate-ping"></div>}
-                      {isProcessing ? (
-                        <div className="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
-                      ) : (
-                        <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
-                      )}
-                    </button>
-                    <p className={`text-xs font-black uppercase tracking-[2px] ${isRecording ? 'text-rose-500 animate-pulse' : 'text-slate-400'}`}>
-                      {isProcessing ? 'AI đang chấm điểm...' : isRecording ? 'Đang ghi âm...' : 'Nhấn để trả lời'}
-                    </p>
-                  </div>
-               )}
+               <p className={`text-[10px] font-black uppercase tracking-[4px] transition-all duration-300 ${isRecording ? 'text-rose-500 animate-pulse' : 'text-slate-400'}`}>
+                 {isProcessing ? 'AI is analyzing...' : isAuraTalking ? 'Aura is speaking...' : isRecording ? 'Recording Answer...' : 'Tap Mic to Start'}
+               </p>
             </div>
           </div>
         </div>
-     );
+      </div>
+    );
   }
 
   return null;

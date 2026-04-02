@@ -1,9 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { SpeakingQuestion, SpeakingExamConfig } from '../types';
-import { OllamaService } from '../services/ollamaService';
 import { AIConfigService } from '../services/aiConfigService';
-import { generateSpeakingQuestions as geminiGenerateSpeaking } from '../services/speakingService';
+import { generateSpeakingQuestions } from '../services/speakingService';
 import { SpeakingImageService } from '../services/speakingImageService';
 import SpeakingExamPrint from './SpeakingExamPrint';
 import { storage, STORAGE_KEYS } from '../services/storageAdapter';
@@ -120,20 +119,7 @@ const SpeakingExamCreator: React.FC<Props> = ({ onBack, initialManualQuestions }
     setIsGenerating(true);
     setAiGeneratedQs([]);
     try {
-      const provider = AIConfigService.getProvider();
-      let qs: SpeakingQuestion[];
-      if (provider === 'gemini') {
-        qs = await geminiGenerateSpeaking(selectedGenTopic, selectedGenLevel);
-      } else {
-        const raw = await OllamaService.generateSpeakingQuestions(selectedGenTopic, selectedGenLevel);
-        qs = raw.map((q: any, idx: number) => ({
-          id: `ai-exam-${Date.now()}-${idx}`,
-          question: q.question || '',
-          sampleAnswer: q.sampleAnswer || q.answer || '',
-          topic: selectedGenTopic,
-          difficulty: q.difficulty || selectedGenLevel,
-        }));
-      }
+      const qs = await generateSpeakingQuestions(selectedGenTopic, selectedGenLevel);
       setAiGeneratedQs(qs.filter(q => q.question?.trim()));
     } catch (e) {
       console.error('[ExamCreator] AI Generate Error:', e);
