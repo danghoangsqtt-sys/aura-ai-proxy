@@ -5,7 +5,7 @@ import SpeakingBasicMode from './SpeakingBasicMode';
 import SpeakingTopicMode from './SpeakingTopicMode';
 import { sendChatMessage } from '../services/geminiService';
 import { STTService } from '../services/sttService';
-import { AIConfigService } from '../services/aiConfigService';
+
 import { OfflineTTSService } from '../services/offlineTTSService';
 import Live2DAvatar from './Live2DAvatar';
 import { EyeState, AppMode } from '../types';

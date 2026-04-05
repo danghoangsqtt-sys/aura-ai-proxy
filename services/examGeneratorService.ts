@@ -5,7 +5,7 @@
  */
 
 import { ExamConfig, Question } from "../types";
-import { AIConfigService } from "./aiConfigService";
+import { authService } from "./authService";
 
 export class ExamGeneratorService {
 
@@ -258,12 +258,11 @@ Now generate ${totalQ} NEW, UNIQUE questions covering all sections above. Every 
   }
 
   private static async generateViaGemini(config: ExamConfig): Promise<Question[]> {
-    const cfg = AIConfigService.getFreshConfig();
-    const proxyUrl = cfg.proxyUrl?.replace(/\/$/, '') || 'http://localhost:8317';
-    const model = cfg.model || 'gemini-2.5-flash';
+    const proxyUrl = import.meta.env.VITE_PROXY_URL?.replace(/\/$/, '') || 'http://localhost:8317';
+    const model = 'gemini-2.5-flash';
 
     if (!proxyUrl || proxyUrl.trim().length === 0) {
-      throw new Error('Chưa thiết lập Proxy URL. Vào Cài đặt để cấu hình hệ thống AI.');
+      throw new Error('Chưa thiết lập Proxy URL. Hãy kiểm tra biến môi trường.');
     }
 
     const totalQuestions = config.sections.reduce((sum, s) => sum + s.count, 0);
@@ -305,9 +304,13 @@ Now generate ${totalQ} NEW, UNIQUE questions covering all sections above. Every 
 
       while (!success) {
         try {
+          const token = await authService.getAIToken();
           const res = await fetch(`${proxyUrl}/v1/chat/completions`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
             body: JSON.stringify({
               model: model,
               messages: [{ role: 'user', content: prompt }],
@@ -347,9 +350,8 @@ Now generate ${totalQ} NEW, UNIQUE questions covering all sections above. Every 
             if (this.isDailyQuotaExhausted(msg)) {
               console.error('[ExamGen/Gemini] ❌ Daily quota exhausted — failing immediately.');
               throw new Error(
-                'Tài khoản Google của bạn đã hết hạn mức miễn phí (limit: 0) cho mô hình này. ' +
-                'Giải pháp: Tạo API Key từ một tài khoản Google (Gmail) mới tại ai.google.dev, ' +
-                'hoặc vào Cài đặt → chuyển sang AI Nội bộ (Ollama) để tiếp tục không giới hạn.'
+                'Tài khoản Google của bạn đã bị giới hạn hạn mức (limit: 0). ' +
+                'Hệ thống không thể tiếp tục yêu cầu bằng tài khoản này. Vui lòng sử dụng tài khoản khác.'
               );
             }
 
@@ -358,8 +360,7 @@ Now generate ${totalQ} NEW, UNIQUE questions covering all sections above. Every 
 
             if (rateLimitRetries > MAX_429_RETRIES) {
               throw new Error(
-                'Google AI liên tục bị giới hạn sau nhiều lần thử lại. ' +
-                'Vui lòng vào Cài đặt chuyển sang dùng AI Nội bộ (Ollama) để tiếp tục, hoặc đợi vài phút rồi thử lại.'
+                'Hệ thống đang quá tải. Vui lòng đợi vài phút rồi thử tạo lại bài kiểm tra.'
               );
             }
 
@@ -380,7 +381,7 @@ Now generate ${totalQ} NEW, UNIQUE questions covering all sections above. Every 
 
           // === API Key invalid ===
           if (msg.includes('API key not valid') || msg.includes('API_KEY_INVALID')) {
-            throw new Error('API Key không hợp lệ. Kiểm tra lại trong Cài đặt → Cấu hình AI.');
+            throw new Error('Đăng nhập không thành công do xác thực Google Token bị từ chối.');
           }
 
           // === Other errors: retry up to 2 times ===

@@ -4,7 +4,7 @@ import { Difficulty } from '../types';
 import { CURRENT_VERSION, checkAppUpdate } from '../services/updateService';
 import { storage, STORAGE_KEYS } from '../services/storageAdapter';
 import { LocalFileService } from '../services/localFileService';
-import { AIConfigService } from '../services/aiConfigService';
+
 import DataTransferUI from './DataTransferUI';
 import type { AppUpdate } from '../types';
 import { Settings2, FolderOpen, RefreshCw, Info, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react';

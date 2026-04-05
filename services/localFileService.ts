@@ -44,12 +44,20 @@ export class LocalFileService {
   // ===== NEW: Appwrite Integration =====
 
   static async saveExamFile(examData: any): Promise<{ success: boolean; path?: string; error?: string }> {
+    // Guest mode: chỉ lưu localStorage, không gọi Cloud
+    const isGuest = sessionStorage.getItem('aura_guest_mode') === '1';
+    if (isGuest) {
+      const exams = JSON.parse(localStorage.getItem('aura_exams_v2') || '[]');
+      const idx = exams.findIndex((e: any) => e.id === examData.id);
+      if (idx >= 0) exams[idx] = examData; else exams.unshift(examData);
+      localStorage.setItem('aura_exams_v2', JSON.stringify(exams));
+      return { success: true };
+    }
     try {
       const result = await CloudDatabaseService.saveExam(examData);
       return { success: result.success, error: result.error };
     } catch (err: any) {
-      console.warn("Lưu qua Cloud thất bại, fallback tạm thời xuống localStorage", err);
-      // Fallback: lưu vào localStorage nếu chưa login (guest mode)
+      console.warn("Lưu qua Cloud thất bại, fallback xuống localStorage", err);
       const exams = JSON.parse(localStorage.getItem('aura_exams_v2') || '[]');
       const idx = exams.findIndex((e: any) => e.id === examData.id);
       if (idx >= 0) exams[idx] = examData; else exams.unshift(examData);
@@ -59,13 +67,13 @@ export class LocalFileService {
   }
 
   static async deleteExamFile(examId: string): Promise<{ success: boolean; error?: string }> {
+    // Guest mode: chỉ xóa trên localStorage
+    const isGuest = sessionStorage.getItem('aura_guest_mode') === '1';
+    const exams = JSON.parse(localStorage.getItem('aura_exams_v2') || '[]');
+    localStorage.setItem('aura_exams_v2', JSON.stringify(exams.filter((e: any) => e.id !== examId)));
+    if (isGuest) return { success: true };
     try {
       const result = await CloudDatabaseService.deleteExam(examId);
-      // Xóa đồng thời trên localStorage (nếu có)
-      const exams = JSON.parse(localStorage.getItem('aura_exams_v2') || '[]');
-      const filtered = exams.filter((e: any) => e.id !== examId);
-      localStorage.setItem('aura_exams_v2', JSON.stringify(filtered));
-      
       return { success: result.success, error: result.error };
     } catch (err: any) {
       return { success: false, error: err.message };
@@ -73,21 +81,24 @@ export class LocalFileService {
   }
 
   static async loadAllExams(): Promise<any[]> {
+    // Guest mode: chỉ dùng localStorage, không gọi Cloud để tránh 401
+    const isGuest = sessionStorage.getItem('aura_guest_mode') === '1';
+    if (isGuest) {
+      return JSON.parse(localStorage.getItem('aura_exams_v2') || '[]');
+    }
     try {
       const cloudExams = await CloudDatabaseService.loadAllExams();
-      // Gom lại với các exam cũ trên local (sau này cần strategy merge)
       const localExams = JSON.parse(localStorage.getItem('aura_exams_v2') || '[]');
-      
-      // Merge by ID
       const map = new Map<string, any>();
       localExams.forEach((e: any) => map.set(e.id, e));
-      cloudExams.forEach((e: any) => map.set(e.id, e)); // Cloud overrides local
-      
+      cloudExams.forEach((e: any) => map.set(e.id, e));
       return Array.from(map.values()).sort((a, b) => {
          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       });
     } catch (err: any) {
-       console.warn("Không thể tải từ Cloud, hiện thông tin Local.", err);
+       if (err.message !== 'User not authenticated') {
+           console.warn("Không thể tải từ Cloud, hiện thông tin Local.", err);
+       }
        return JSON.parse(localStorage.getItem('aura_exams_v2') || '[]');
     }
   }

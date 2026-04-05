@@ -1,6 +1,5 @@
-
 import { ExamConfig, Question, VocabularyItem } from "../types";
-import { AIConfigService } from "./aiConfigService";
+import { authService } from "./authService";
 
 // ═══════════════════════════════════════════════
 // Core: OpenAI-compatible Proxy Fetch
@@ -19,54 +18,70 @@ interface ProxyRequestOptions {
 }
 
 /**
- * Hàm fetch trung tâm — gọi CLIProxy theo chuẩn OpenAI API.
- * Lỗi 401 → ném lỗi rõ ràng để UI nhắc người dùng đăng nhập.
+ * Core: Gọi thẳng Gemini REST API bằng token ya29.* của người dùng (BYOA Mode)
+ * Bỏ qua CLIProxyAPI — đây là kiến trúc đúng cho BYOA.
  */
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
+const DEFAULT_GEMINI_MODEL = 'gemini-2.0-flash';
+
+/** Chuyển đổi messages (OpenAI format) → Gemini content format */
+const toGeminiPayload = (messages: ProxyMessage[], opts: ProxyRequestOptions) => {
+  const systemMsg = messages.find(m => m.role === 'system');
+  const chatMsgs  = messages.filter(m => m.role !== 'system');
+
+  const contents = chatMsgs.map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }]
+  }));
+
+  const payload: any = {
+    contents,
+    generationConfig: {
+      temperature: opts.temperature ?? 0.7,
+      ...(opts.max_tokens ? { maxOutputTokens: opts.max_tokens } : {}),
+      ...(opts.response_format?.type === 'json_object' ? { responseMimeType: 'application/json' } : {}),
+    }
+  };
+  if (systemMsg) payload.systemInstruction = { parts: [{ text: systemMsg.content as string }] };
+  return payload;
+};
+
 const proxyFetch = async (
   messages: ProxyMessage[],
   opts: ProxyRequestOptions = {}
 ): Promise<string> => {
-  const cfg = AIConfigService.getFreshConfig();
-  const proxyUrl = cfg.proxyUrl?.replace(/\/$/, '') || 'http://localhost:8317';
-  const model = opts.model || cfg.model || 'gemini-2.5-flash';
-
-  const body = {
-    model,
-    messages,
-    temperature: opts.temperature ?? 0.7,
-    ...(opts.response_format ? { response_format: opts.response_format } : {}),
-    ...(opts.max_tokens ? { max_tokens: opts.max_tokens } : {}),
-  };
+  const model = opts.model || DEFAULT_GEMINI_MODEL;
+  const payload = toGeminiPayload(messages, opts);
 
   let res: Response;
   try {
-    res = await fetch(`${proxyUrl}/v1/chat/completions`, {
+    const token = await authService.getAIToken();
+    res = await fetch(`${GEMINI_API_BASE}/${model}:generateContent`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify(payload),
     });
   } catch (networkError: any) {
-    throw new Error(`Không thể kết nối máy chủ AI (${proxyUrl}). Kiểm tra lại kết nối mạng.`);
+    throw new Error(`Không thể kết nối Gemini API. Kiểm tra lại kết nối mạng.`);
   }
 
-  if (res.status === 401) {
-    throw new Error('UNAUTHORIZED: Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để tiếp tục.');
-  }
-
-  if (res.status === 429) {
-    throw new Error('Hệ thống AI đang quá tải. Vui lòng thử lại sau 1 phút.');
-  }
-
+  if (res.status === 401) throw new Error('UNAUTHORIZED: Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để tiếp tục.');
+  if (res.status === 403) throw new Error('Tài khoản Google chưa có quyền truy cập Gemini API. Kiểm tra Google Cloud Console.');
+  if (res.status === 429) throw new Error('Hệ thống AI đang quá tải (vượt quota). Vui lòng thử lại sau 1 phút.');
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    throw new Error(`Lỗi từ máy chủ AI (${res.status}): ${errText || 'Không xác định'}`);
+    throw new Error(`Lỗi từ Gemini API (${res.status}): ${errText || 'Không xác định'}`);
   }
 
   const data = await res.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (!content) throw new Error('Phản hồi từ AI không hợp lệ hoặc rỗng.');
-  return content as string;
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('Phản hồi từ AI không hợp lệ hoặc rỗng.');
+  return text as string;
 };
+
 
 /**
  * Fetch có đính kèm dữ liệu nhị phân (ảnh/audio) dưới dạng base64.
@@ -458,8 +473,7 @@ export const generateVocabImage = async (word: string, meaning: string): Promise
   ];
 
   try {
-    const cfg = AIConfigService.getFreshConfig();
-    const proxyUrl = cfg.proxyUrl?.replace(/\/$/, '') || 'http://localhost:8317';
+    const proxyUrl = import.meta.env.VITE_PROXY_URL?.replace(/\/$/, '') || 'http://localhost:8317';
 
     // Thử gọi image generation endpoint nếu proxy hỗ trợ
     const res = await fetch(`${proxyUrl}/v1/images/generations`, {
@@ -502,7 +516,7 @@ Trả lời súc tích, rõ ràng, dùng tiếng Việt hoặc tiếng Anh tùy 
 Khi giải thích ngữ pháp hoặc từ vựng, hãy kèm ví dụ cụ thể.`;
 
 /**
- * Gửi tin nhắn trong Chatbot và nhận phản hồi từ proxy
+ * Gửi tin nhắn trong Chatbot và nhận phản hồi trực tiếp từ Gemini API
  */
 export const sendChatMessage = async (history: ChatMessage[], newMessage: string): Promise<string> => {
   const messages: ProxyMessage[] = [
@@ -514,25 +528,5 @@ export const sendChatMessage = async (history: ChatMessage[], newMessage: string
     { role: 'user', content: newMessage },
   ];
 
-  const cfg = AIConfigService.getFreshConfig();
-  const proxyUrl = cfg.proxyUrl?.replace(/\/$/, '') || 'http://localhost:8317';
-  const model = cfg.model || 'gemini-2.5-flash';
-
-  let res: Response;
-  try {
-    res = await fetch(`${proxyUrl}/v1/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages, temperature: 0.8 }),
-    });
-  } catch {
-    throw new Error(`Không thể kết nối máy chủ AI (${proxyUrl}).`);
-  }
-
-  if (res.status === 401) throw new Error('UNAUTHORIZED: Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.');
-  if (res.status === 429) throw new Error('Hệ thống AI đang quá tải. Thử lại sau 1 phút.');
-  if (!res.ok) throw new Error(`Lỗi máy chủ AI (${res.status})`);
-
-  const data = await res.json();
-  return data?.choices?.[0]?.message?.content || 'Aura không có phản hồi.';
+  return proxyFetch(messages, { temperature: 0.8 });
 };

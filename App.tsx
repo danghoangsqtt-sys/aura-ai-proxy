@@ -20,7 +20,7 @@ import IPAMaster from './components/IPA/IPAMaster';
 import GearSidebar from './components/GearSidebar';
 import WritingMaster from './components/Writing/WritingMaster';
 import AuthModal from './components/Auth/AuthModal';
-import { authService } from './services/authService';
+import { authService, isGuestUser } from './services/authService';
 import WelcomePage from './components/WelcomePage';
 import BootScreen from './components/BootScreen';
 import AdminDashboard from './components/AdminDashboard';
@@ -69,26 +69,45 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const initApp = async () => {
-      console.info('[App] -> [Action]: Initializing App (Local AI Offline Mode)...');
+      console.info('[App] -> [Action]: Initializing App...');
       
       // Check user authentication
-      try {
-        const currentUser = await authService.getCurrentUser();
+      let currentUser: any = null;
+      // Nếu đang là Guest (sessionStorage flag), skip Appwrite hoàn toàn
+      const guestFlag = sessionStorage.getItem('aura_guest_mode');
+      if (guestFlag === '1') {
+        currentUser = { email: 'guest@localhost', name: 'Khách (Dùng thử)' };
         setUser(currentUser);
-      } catch (err) {
-        setUser(null);
-      } finally {
         setAuthLoading(false);
+      } else {
+        try {
+          currentUser = await authService.getCurrentUser();
+          setUser(currentUser);
+        } catch {
+          setUser(null);
+        } finally {
+          setAuthLoading(false);
+        }
       }
 
-      try {
-        const savedExams = await LocalFileService.loadAllExams();
-        setExamList(savedExams);
-      } catch (err) {
-        console.error('[App] -> [ERROR]: Failed to load local data:', err);
+      // Chỉ tải dữ liệu Cloud nếu CÓ USER và KHÔNG phải Guest
+      if (currentUser && !isGuestUser(currentUser)) {
+        try {
+          const savedExams = await LocalFileService.loadAllExams();
+          setExamList(savedExams);
+        } catch (err) {
+          console.error('[App] -> [ERROR]: Failed to load data:', err);
+        }
+      } else {
+        // Guest hoặc Chưa login: tải từ localStorage/IndexedDB cục bộ
+        console.info('[App] -> [Guest/Offline]: Skipping Cloud sync, loading local data.');
+        try {
+          const savedExams = await LocalFileService.loadAllExams().catch(() => []);
+          setExamList(savedExams);
+        } catch (_) { /* bỏ qua */ }
       }
 
-      // Load study documents & folders
+      // Load study documents & folders (luôn từ localStorage, an toàn với cả Guest)
       try {
         const savedDocs = await storage.get<StudyDocument[]>(STORAGE_KEYS.STUDY_DOCUMENTS, []);
         const savedFolders = await storage.get<DocumentFolder[]>(STORAGE_KEYS.DOCUMENT_FOLDERS, []);

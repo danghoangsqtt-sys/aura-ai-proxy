@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { SpeakingQuestion, SpeakingExamConfig } from '../types';
-import { AIConfigService } from '../services/aiConfigService';
+
 import { generateSpeakingQuestions } from '../services/speakingService';
 import { SpeakingImageService } from '../services/speakingImageService';
 import SpeakingExamPrint from './SpeakingExamPrint';

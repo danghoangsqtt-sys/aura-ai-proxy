@@ -1,6 +1,6 @@
 
 import { SpeakingQuestion, SpeakingFeedback } from "../types";
-import { AIConfigService } from "./aiConfigService";
+import { authService } from "./authService";
 
 // ═══════════════════════════════════════════════
 // Proxy helpers (chuẩn OpenAI API)
@@ -12,15 +12,18 @@ interface ProxyMessage {
 }
 
 const proxyFetch = async (messages: ProxyMessage[], temperature = 0.7): Promise<string> => {
-  const cfg = AIConfigService.getFreshConfig();
-  const proxyUrl = cfg.proxyUrl?.replace(/\/$/, '') || 'http://localhost:8317';
-  const model = cfg.model || 'gemini-2.5-flash';
+  const proxyUrl = import.meta.env.VITE_PROXY_URL?.replace(/\/$/, '') || 'http://localhost:8317';
+  const model = 'gemini-2.5-flash';
 
   let res: Response;
   try {
+    const token = await authService.getAIToken();
     res = await fetch(`${proxyUrl}/v1/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
       body: JSON.stringify({ model, messages, temperature, response_format: { type: 'json_object' } }),
     });
   } catch {
@@ -54,15 +57,18 @@ const proxyFetchWithAudio = async (
     },
   ];
   // Không yêu cầu json_object cho audio để tránh lỗi trên proxy chưa hỗ trợ
-  const cfg = AIConfigService.getFreshConfig();
-  const proxyUrl = cfg.proxyUrl?.replace(/\/$/, '') || 'http://localhost:8317';
-  const model = cfg.model || 'gemini-2.5-flash';
+  const proxyUrl = import.meta.env.VITE_PROXY_URL?.replace(/\/$/, '') || 'http://localhost:8317';
+  const model = 'gemini-2.5-flash';
 
   let res: Response;
   try {
+    const token = await authService.getAIToken();
     res = await fetch(`${proxyUrl}/v1/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
       body: JSON.stringify({ model, messages, temperature: 0.1 }),
     });
   } catch {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { generateMacaronicStory } from '../services/geminiService';
-import { AIConfigService } from '../services/aiConfigService';
+
 import { canvasStorage } from '../services/localDataService';
 import { PersonalVocabData } from '../types';
 

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { LiveService } from '../services/liveService';
 import { AudioRecorder, AudioPlayer } from '../utils/audioUtils';
-import { AIConfigService } from '../services/aiConfigService';
+
 
 export interface ChatMessage {
     id: string;
