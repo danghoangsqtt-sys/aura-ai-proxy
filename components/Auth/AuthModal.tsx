@@ -9,13 +9,14 @@ const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleGoogleLogin = () => {
+  const handleGoogleLogin = async () => {
     setIsLoading(true);
     setError(null);
     try {
-      authService.loginWithGoogle();
+      const user = await authService.loginWithProxy();
+      onSuccess(user);
     } catch (err: any) {
-      setError(err.message || 'Đã có lỗi xảy ra khi khởi tạo đăng nhập Google.');
+      setError(err.message || 'Đã có lỗi xảy ra khi gọi Proxy Login.');
       setIsLoading(false);
     }
   };

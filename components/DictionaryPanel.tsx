@@ -1,24 +1,6 @@
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-export interface DictionaryResponse {
-  vocabulary: string;
-  phonetics?: { uk: string; us: string };
-  wordFamily?: string[];
-  usageNotes?: string;
-  idiomsAndPhrasals?: { phrase: string; meaning: string; example: string }[];
-  specializedMeanings?: { field: string; meanings: { meaning: string; example?: string }[] }[];
-  compoundWords?: { word: string; meaning: string }[];
-  details: {
-    pos: string;
-    meanings: {
-      meaning: string;
-      examples: string[];
-      synonyms?: string[];
-      antonyms?: string[];
-      context?: string;
-    }[];
-  }[];
-}
+import React, { useState, useEffect, useRef } from 'react';
+import { TTSService } from '../services/ttsService';
 import WordFormationGuide from './Dictionary/WordFormationGuide';
 import PartsOfSpeechGuide from './Dictionary/PartsOfSpeechGuide';
 import WordStressGuide from './Dictionary/WordStressGuide';
@@ -26,11 +8,10 @@ import GrammarArena from './Dictionary/GrammarArena';
 import VocabBankCanvas from './Dictionary/VocabBankCanvas';
 import { canvasStorage } from '../services/localDataService';
 import { SavedWord, HybridDictEntry } from '../types';
-import { searchOfflineDictionary } from '../services/localDictService';
-import { getLearnedWord, saveLearnedWord } from '../services/learnedDictService';
-import { enrichWithExternalData } from '../services/externalDictionaryService';
+import { lookupWord, fetchAutocompleteSuggestions, fetchSpellCheck, PowerDictResult } from '../services/powerDictionaryService';
 import { analyzeWordMorphology } from '../services/morphologyService';
 import { analyzeLanguage } from '../services/geminiService';
+import { saveLearnedWord } from '../services/learnedDictService';
 import { 
   BookOpen, 
   Volume2, 
@@ -56,22 +37,39 @@ const DictionaryPanel: React.FC = () => {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   
-  const [aiData, setAiData] = useState<DictionaryResponse | null>(null);
-  const [offlineData, setOfflineData] = useState<HybridDictEntry | null>(null);
+  const [powerResult, setPowerResult] = useState<PowerDictResult | null>(null);
+  // Map powerResult into offlineData shape for rendering compatibility
+  const offlineData: HybridDictEntry | null = powerResult ? {
+    vocabulary: powerResult.vocabulary,
+    ipa: powerResult.ipa,
+    phonetics: powerResult.phonetics,
+    details: powerResult.details,
+    wordFamily: powerResult.wordFamily,
+    usageNotes: powerResult.usageNotes,
+    idiomsAndPhrasals: powerResult.idiomsAndPhrasals,
+    specializedMeanings: powerResult.specializedMeanings,
+    compoundWords: powerResult.compoundWords,
+  } : null;
+  // Map enrichment fields for rendering compatibility
+  const enrichment = powerResult ? {
+    wordForms: [],
+    allSynonyms: powerResult.allSynonyms || [],
+    allAntonyms: powerResult.allAntonyms || [],
+    extraMeanings: [],
+    ukPhonetic: powerResult.phonetics?.uk,
+    usPhonetic: powerResult.phonetics?.us,
+    ukAudioUrl: powerResult.ukAudio,
+    usAudioUrl: powerResult.usAudio,
+  } : null;
+  // AI deep-analysis layer — populated only on explicit user request
+  const [aiDeepData, setAiDeepData] = useState<any>(null);
+  const [aiDeepLoading, setAiDeepLoading] = useState(false);
+  const aiData = aiDeepData; // rendering compat: controls AI boost visibility
   const [isNotFoundOffline, setIsNotFoundOffline] = useState(false);
+  const [spellCorrections, setSpellCorrections] = useState<string[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showToast, setShowToast] = useState<{show: boolean, msg: string}>({show: false, msg: ''});
-  const [enrichment, setEnrichment] = useState<{
-    wordForms: { pos: string; form: string }[];
-    allSynonyms: string[];
-    allAntonyms: string[];
-    extraMeanings: { pos: string; definition: string; example?: string; synonyms: string[]; antonyms: string[] }[];
-    ukPhonetic?: string;
-    usPhonetic?: string;
-    ukAudioUrl?: string;
-    usAudioUrl?: string;
-  } | null>(null);
   
   const wrapperRef = useRef<HTMLDivElement>(null);
   const resultRef = useRef<HTMLDivElement>(null);
@@ -79,7 +77,7 @@ const DictionaryPanel: React.FC = () => {
   const block2Ref = useRef<HTMLDivElement>(null);
   const block3Ref = useRef<HTMLDivElement>(null);
 
-  // Autocomplete gợi ý từ
+  // Autocomplete gợi ý từ (dùng powerDictionaryService)
   useEffect(() => {
     const fetchSuggestions = async () => {
       const trimmedQuery = query.trim();
@@ -87,14 +85,9 @@ const DictionaryPanel: React.FC = () => {
         setSuggestions([]);
         return;
       }
-      try {
-        const res = await fetch(`https://api.datamuse.com/sug?s=${encodeURIComponent(trimmedQuery)}&max=6`);
-        if (res.ok) {
-          const json = await res.json();
-          setSuggestions(json.map((item: any) => item.word));
-          setShowSuggestions(true);
-        }
-      } catch (e) { setSuggestions([]); }
+      const words = await fetchAutocompleteSuggestions(trimmedQuery);
+      setSuggestions(words);
+      setShowSuggestions(words.length > 0);
     };
     const timer = setTimeout(fetchSuggestions, 300);
     return () => clearTimeout(timer);
@@ -111,126 +104,66 @@ const DictionaryPanel: React.FC = () => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const harmonizeAiData = (result: DictionaryResponse): HybridDictEntry => {
-    return {
-      vocabulary: result.vocabulary,
-      ipa: result.phonetics?.uk || "/.../",
-      phonetics: result.phonetics,
-      wordFamily: result.wordFamily,
-      usageNotes: result.usageNotes,
-      idiomsAndPhrasals: result.idiomsAndPhrasals,
-      specializedMeanings: result.specializedMeanings?.map(spec => ({
-        field: spec.field,
-        meanings: spec.meanings.map(m => ({
-          mean: m.meaning,
-          example: m.example || ""
-        }))
-      })),
-      compoundWords: result.compoundWords,
-      details: result.details.map(d => ({
-        pos: d.pos,
-        means: d.meanings.map(m => ({
-          mean: m.meaning,
-          examples: m.examples,
-          example: m.examples?.[0] || "",
-          synonyms: m.synonyms,
-          antonyms: m.antonyms,
-          context: m.context
-        }))
-      }))
-    };
-  };
-
   const handleSearch = async (textInput: string = query) => {
     const text = textInput.trim();
     if (!text) return;
 
-    setAiLoading(false);
     setShowSuggestions(false);
-    setAiData(null);
-    setOfflineData(null);
+    setPowerResult(null);
+    setAiDeepData(null);
     setIsNotFoundOffline(false);
+    setSpellCorrections([]);
     setError(null);
-    setEnrichment(null);
-
-    // TIER 1: Core Offline (Từ điển chuẩn)
-    const localResult = await searchOfflineDictionary(text);
-    if (localResult) {
-      setOfflineData(localResult);
-      // Auto-enrich from external API in background
-      enrichWithExternalData(text).then(data => {
-        if (data) setEnrichment(data);
-      }).catch(() => {});
-      return;
-    }
-
-    // TIER 2: Learned Dictionary (Trí nhớ AI)
-    const learnedResult = getLearnedWord(text);
-    if (learnedResult) {
-      const hData = harmonizeAiData(learnedResult);
-      setAiData(learnedResult);
-      setOfflineData(hData);
-      // Also enrich learned results
-      enrichWithExternalData(text).then(data => {
-        if (data) setEnrichment(data);
-      }).catch(() => {});
-      return;
-    }
-
-    // TIER 3: AI Fallback (Nếu không tìm thấy ở 2 lớp trên)
-    // But first try external API for basic data
-    const externalData = await enrichWithExternalData(text);
-    if (externalData && externalData.extraMeanings.length > 0) {
-      // Build a HybridDictEntry from external data
-      const grouped: Record<string, typeof externalData.extraMeanings> = {};
-      for (const m of externalData.extraMeanings) {
-        if (!grouped[m.pos]) grouped[m.pos] = [];
-        grouped[m.pos].push(m);
-      }
-      const builtEntry: HybridDictEntry = {
-        vocabulary: text,
-        ipa: externalData.ukPhonetic || externalData.usPhonetic || '/.../  ',
-        details: Object.entries(grouped).map(([pos, means]) => ({
-          pos,
-          means: means.map(m => ({
-            mean: m.definition,
-            example: m.example || '',
-            examples: m.example ? [m.example] : [],
-            synonyms: m.synonyms.length > 0 ? m.synonyms : undefined,
-            antonyms: m.antonyms.length > 0 ? m.antonyms : undefined,
-          }))
-        })),
-        wordFamily: externalData.wordForms.map(wf => `${wf.pos}: ${wf.form}`),
-      };
-      setOfflineData(builtEntry);
-      setEnrichment(externalData);
-      return;
-    }
-
-    setIsNotFoundOffline(true);
-  };
-
-  const handleAiAnalyze = async () => {
-    if (!query) return;
     setAiLoading(true);
-    setIsNotFoundOffline(false);
-    setError(null);
+
     try {
-      let result;
-      result = await analyzeLanguage(query);
-      
-      // Tự động lưu vào "Trí nhớ cục bộ" (Learned Dictionary)
-      saveLearnedWord(query, result);
-      
-      // Chuyển đổi và hiển thị
-      const harmonizedData = harmonizeAiData(result);
-      setAiData(result); 
-      setOfflineData(harmonizedData); 
+      const result = await lookupWord(text);
+      if (result) {
+        setPowerResult(result);
+      } else {
+        setIsNotFoundOffline(true);
+        // Look up spelling suggestions
+        const corrections = await fetchSpellCheck(text);
+        setSpellCorrections(corrections);
+      }
     } catch (err: any) {
-      console.error("[Dictionary] All AI Engines failed:", err);
-      setError('Không thể kết nối với trí tuệ nhân tạo Aura. Vui lòng kiểm tra API Key hoặc LLM cục bộ.');
+      setError('Không thể tra từ. Kiểm tra kết nối mạng và thử lại.');
     } finally {
       setAiLoading(false);
+    }
+  };
+
+  /**
+   * AI Deep Analysis — optional, user-triggered.
+   * Augments (non-destructively) the existing API result with:
+   * idioms, collocations, specialized meanings, usage notes, etymology.
+   */
+  const handleAiAnalyze = async () => {
+    const text = query.trim();
+    if (!text) return;
+    setAiDeepLoading(true);
+    setError(null);
+    try {
+      const result = await analyzeLanguage(text);
+      saveLearnedWord(text, result);
+      setAiDeepData(result);
+      // Merge AI fields into powerResult (augment, never overwrite API data)
+      setPowerResult(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          usageNotes: (result as any).usageNotes || prev.usageNotes,
+          idiomsAndPhrasals: (result as any).idiomsAndPhrasals || prev.idiomsAndPhrasals,
+          specializedMeanings: (result as any).specializedMeanings || prev.specializedMeanings,
+          compoundWords: (result as any).compoundWords || prev.compoundWords,
+          wordFamily: (result as any).wordFamily || prev.wordFamily,
+          etymology: (result as any).etymology || prev.etymology,
+        };
+      });
+    } catch (err: any) {
+      setError('Không thể kết nối AI. Kiểm tra CLIProxyAPI (port 8317) và thử lại.');
+    } finally {
+      setAiDeepLoading(false);
     }
   };
 
@@ -240,14 +173,11 @@ const DictionaryPanel: React.FC = () => {
     }
   };
 
-  const speak = (text: string, lang: string = 'en-US') => {
-    if (!window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = lang;
-    utterance.rate = 0.9;
-    window.speechSynthesis.speak(utterance);
+  // Dùng TTSService — giọng nữ Google tự nhiên (nhất quán với Aura)
+  const speak = (text: string, _lang: string = 'en-US') => {
+    TTSService.getInstance().speak(text);
   };
+
 
   // Folder picker state for save flow
   const [showFolderPicker, setShowFolderPicker] = useState(false);
@@ -435,8 +365,8 @@ const DictionaryPanel: React.FC = () => {
                               </div>
                               <button 
                                 onClick={() => {
-                                  if (enrichment?.ukAudioUrl) {
-                                    new Audio(enrichment.ukAudioUrl).play().catch(() => speak(offlineData.vocabulary, 'en-GB'));
+                                  if (powerResult?.ukAudio) {
+                                    new Audio(powerResult.ukAudio).play().catch(() => speak(offlineData.vocabulary, 'en-GB'));
                                   } else {
                                     speak(offlineData.vocabulary, 'en-GB');
                                   }
@@ -456,8 +386,8 @@ const DictionaryPanel: React.FC = () => {
                               </div>
                               <button 
                                 onClick={() => {
-                                  if (enrichment?.usAudioUrl) {
-                                    new Audio(enrichment.usAudioUrl).play().catch(() => speak(offlineData.vocabulary, 'en-US'));
+                                  if (powerResult?.usAudio) {
+                                    new Audio(powerResult.usAudio).play().catch(() => speak(offlineData.vocabulary, 'en-US'));
                                   } else {
                                     speak(offlineData.vocabulary, 'en-US');
                                   }
@@ -624,7 +554,12 @@ const DictionaryPanel: React.FC = () => {
                                 <span className="w-6 h-6 rounded-md bg-blue-50 text-blue-600 text-[10px] flex items-center justify-center shrink-0 border border-blue-100 font-serif italic">
                                    {mIdx + 1}
                                 </span>
-                                {m.mean}
+                                <span>
+                                  {m.mean}
+                                  {(m as any).meanVi && (
+                                    <span className="block text-sm font-bold text-indigo-600 mt-0.5">🇻🇳 {(m as any).meanVi}</span>
+                                  )}
+                                </span>
                               </h3>
                               
                               {/* Multiple Examples with translation */}
@@ -768,21 +703,45 @@ const DictionaryPanel: React.FC = () => {
                    </div>
                 )}
 
-                {/* AI Boost Link (If offline data is from simple source) */}
-                {!aiData && (
-                  <div className="mt-12 pt-8 border-t border-slate-50 text-center">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-[4px] mb-6">Bạn cần phân tích chuyên khảo chi tiết hơn?</p>
-                    <button 
-                      onClick={handleAiAnalyze} 
-                      className="group relative inline-flex items-center gap-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-10 py-5 rounded-[24px] transition-all shadow-[0_20px_40px_rgba(37,99,235,0.2)] hover:shadow-blue-300 active:scale-95 overflow-hidden"
+                {/* AI Deep Analysis Button */}
+                {!aiDeepData && (
+                  <div className="mt-10 pt-6 border-t border-slate-100 text-center">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-[4px] mb-4">Muốn phân tích ngôn ngữ chuyên sâu hơn?</p>
+                    <button
+                      onClick={handleAiAnalyze}
+                      disabled={aiDeepLoading}
+                      className="group relative inline-flex items-center gap-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 text-white px-8 py-4 rounded-2xl transition-all shadow-xl active:scale-95 overflow-hidden"
                     >
-                       <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
-                       <Sparkles className="w-6 h-6 animate-pulse relative z-10" />
-                       <div className="text-left relative z-10">
-                          <p className="text-[10px] font-black uppercase tracking-[2px] leading-none mb-1 opacity-80">Siêu trí tuệ Aura</p>
-                          <p className="text-[13px] font-bold">Kích hoạt phân tích ngôn ngữ sâu</p>
-                       </div>
+                      <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
+                      {aiDeepLoading
+                        ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin relative z-10" />
+                        : <Sparkles className="w-5 h-5 relative z-10" />}
+                      <div className="text-left relative z-10">
+                        <p className="text-[9px] font-black uppercase tracking-widest leading-none mb-0.5 opacity-80">Aura AI · Phân tích chuyên sâu</p>
+                        <p className="text-[13px] font-bold">{aiDeepLoading ? 'Đang phân tích...' : '✨ Kích hoạt AI Linguistics'}</p>
+                      </div>
                     </button>
+                    <p className="text-[9px] text-slate-300 mt-2">Idioms · Chuyên ngành · Collocations · Etymology</p>
+                  </div>
+                )}
+                {aiDeepData && (
+                  <div className="mt-4 flex items-center gap-2 text-[9px] font-black text-emerald-600">
+                    <Sparkles className="w-3 h-3" />
+                    <span>AI đã phân tích chuyên sâu thành công</span>
+                  </div>
+                )}
+
+                {/* Source attribution */}
+                {powerResult?.sourceUrl && (
+                  <div className="mt-4 pt-3 border-t border-slate-50 flex items-center gap-2">
+                    <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">Nguồn:</span>
+                    <a href={powerResult.sourceUrl} target="_blank" rel="noopener noreferrer"
+                      className="text-[9px] font-bold text-indigo-400 hover:text-indigo-600 transition-colors underline underline-offset-2">
+                      {powerResult.sourceUrl.replace('https://', '')}
+                    </a>
+                    {powerResult.isFromCache && (
+                      <span className="ml-auto px-2 py-0.5 bg-emerald-50 text-emerald-600 text-[8px] font-black rounded-full border border-emerald-100">⚡ Cache</span>
+                    )}
                   </div>
                 )}
               </div>
@@ -795,10 +754,27 @@ const DictionaryPanel: React.FC = () => {
                      <Search className="w-10 h-10" />
                   </div>
                   <h3 className="text-xl font-black text-slate-800 mb-3 uppercase tracking-tight">KHOA MỤC CHƯA CẬP NHẬT</h3>
-                  <p className="text-[13px] font-semibold text-slate-500 mb-12 max-w-xs mx-auto leading-relaxed px-4">
-                    Không tìm thấy <span className="text-blue-600 font-black">"{query}"</span> trong từ điển chuẩn. <br/> Đây có thể là một từ lóng, cụm từ ghép, hoặc từ vựng tiếng Việt.
+                  <p className="text-[13px] font-semibold text-slate-500 mb-8 max-w-xs mx-auto leading-relaxed px-4">
+                    Không tìm thấy <span className="text-blue-600 font-black">"{query}"</span> trong từ điển chuẩn. <br/> Đây có thể là một từ lóng, cụm từ ghép, hoặc do viết sai chính tả.
                   </p>
                   
+                  {spellCorrections.length > 0 && (
+                    <div className="mb-10 animate-in slide-in-from-bottom-2 duration-500">
+                      <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-3">Có phải ý bạn là?</p>
+                      <div className="flex flex-wrap justify-center gap-2">
+                        {spellCorrections.map(correction => (
+                          <button
+                            key={correction}
+                            onClick={() => { setQuery(correction); handleSearch(correction); }}
+                            className="px-4 py-2 bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white rounded-xl text-sm font-bold transition-all shadow-sm"
+                          >
+                            {correction}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <button 
                     onClick={handleAiAnalyze} 
                     className="group relative flex items-center gap-5 bg-slate-900 hover:bg-blue-600 text-white px-12 py-6 rounded-3xl mx-auto transition-all shadow-2xl active:scale-95"
@@ -853,7 +829,7 @@ const DictionaryPanel: React.FC = () => {
         )}
       </div>
 
-      {/* Loading States Overlay - Redesigned */}
+      {/* Loading States Overlay */}
       {aiLoading && viewMode === 'lookup' && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur-md border border-indigo-100 px-6 py-2.5 rounded-full shadow-2xl flex items-center gap-3 z-[100] animate-in slide-in-from-top-4 duration-300">
           <div className="relative">
@@ -861,7 +837,7 @@ const DictionaryPanel: React.FC = () => {
              <div className="absolute inset-0 w-3 h-3 bg-indigo-400 rounded-full opacity-50"></div>
           </div>
           <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">
-            Aura is Thinking...
+            Đang tra từ...
           </span>
         </div>
       )}
@@ -870,8 +846,8 @@ const DictionaryPanel: React.FC = () => {
       {/* Footer Status */}
       <div className="mt-4 pt-4 border-t border-slate-50 flex justify-between items-center text-[8px] font-black text-slate-300 uppercase tracking-widest shrink-0">
         <div className="flex gap-4">
-           <span className="text-indigo-500 font-bold">Ollama Architecture</span>
-           <span className="bg-indigo-100 rounded-md px-2 text-indigo-700">Aura Gen Lexicon v2.0</span>
+           <span className="text-indigo-500 font-bold">Free Dict + MyMemory + Datamuse</span>
+           <span className="bg-indigo-100 rounded-md px-2 text-indigo-700">Aura Gen Lexicon v3.0</span>
         </div>
         <span>DHsystem Engine 2026</span>
       </div>

@@ -1,0 +1,33 @@
+LỆNH YÊU CẦU THU HỒI VÀ LƯU LỊCH SỬ LÀM VIÊC
+
+I need to step away and will close this session soon. To ensure a seamless continuation tomorrow without losing context, switch to Technical Project Manager mode.
+
+Execution Steps:
+
+Create a directory named .ai-context at the root of the project.
+
+Inside it, create the following 3 markdown files based on our work today:
+
+STATE.md: Summarize today's achievements (Migrated from Appwrite to CLIProxyAPI bypass auth, implemented loginWithProxy(), fixed the locked Management API by updating config.yaml with a secret key and CORS).
+
+ROADMAP.md: Outline the immediate next steps for tomorrow (e.g., Run E2E manual tests on localhost:5173, verify the chat completion API flow, clean up any residual Appwrite dead code).
+
+BUGS_AND_NOTES.md: Log the recent Connection Refused issue, the importance of port 8316 vs 8080, and any pending edge cases we need to watch out for.
+
+Please read your internal memory of our conversation and generate these files immediately. Confirm when done.
+
+
+
+Lệnh "Đánh thức" cho ngày mai (Lưu lại ra Notepad/Zalo để mai dùng)
+Sáng ngày mai, khi bạn mở lại dự án và bật Claude Code lên, việc đầu tiên bạn làm là "bơm" lại trí nhớ cho nó bằng lệnh này:
+
+[SESSION RESUME & CONTEXT RESTORE]
+Good morning! We are resuming our work on the Aura AI Proxy project.
+
+Execution Steps:
+
+Use your tools to read all files inside the .ai-context/ directory (STATE.md, ROADMAP.md, BUGS_AND_NOTES.md).
+
+Print out a brief, high-energy summary (3 bullet points) of exactly where we left off.
+
+Look at ROADMAP.md and propose the very first actionable step or command we should execute right now to get back to work. Wait for my "Proceed" command.

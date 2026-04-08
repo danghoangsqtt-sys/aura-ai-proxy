@@ -41,12 +41,20 @@ export class LocalFileService {
     return await this.loadData('settings');
   }
 
-  // ===== NEW: Appwrite Integration =====
+  // ===== NEW: Appwrite Integration — skipped in proxy/guest mode =====
+
+  /** Returns true when Appwrite cloud sync should be skipped */
+  private static isLocalOnlyMode(): boolean {
+    // Guest mode
+    if (sessionStorage.getItem('aura_guest_mode') === '1') return true;
+    // Proxy BYOA mode — not an Appwrite user, no cloud session
+    if (localStorage.getItem('aura_chat_api_key')) return true;
+    return false;
+  }
+
 
   static async saveExamFile(examData: any): Promise<{ success: boolean; path?: string; error?: string }> {
-    // Guest mode: chỉ lưu localStorage, không gọi Cloud
-    const isGuest = sessionStorage.getItem('aura_guest_mode') === '1';
-    if (isGuest) {
+    if (this.isLocalOnlyMode()) {
       const exams = JSON.parse(localStorage.getItem('aura_exams_v2') || '[]');
       const idx = exams.findIndex((e: any) => e.id === examData.id);
       if (idx >= 0) exams[idx] = examData; else exams.unshift(examData);
@@ -67,11 +75,9 @@ export class LocalFileService {
   }
 
   static async deleteExamFile(examId: string): Promise<{ success: boolean; error?: string }> {
-    // Guest mode: chỉ xóa trên localStorage
-    const isGuest = sessionStorage.getItem('aura_guest_mode') === '1';
     const exams = JSON.parse(localStorage.getItem('aura_exams_v2') || '[]');
     localStorage.setItem('aura_exams_v2', JSON.stringify(exams.filter((e: any) => e.id !== examId)));
-    if (isGuest) return { success: true };
+    if (this.isLocalOnlyMode()) return { success: true };
     try {
       const result = await CloudDatabaseService.deleteExam(examId);
       return { success: result.success, error: result.error };
@@ -81,9 +87,7 @@ export class LocalFileService {
   }
 
   static async loadAllExams(): Promise<any[]> {
-    // Guest mode: chỉ dùng localStorage, không gọi Cloud để tránh 401
-    const isGuest = sessionStorage.getItem('aura_guest_mode') === '1';
-    if (isGuest) {
+    if (this.isLocalOnlyMode()) {
       return JSON.parse(localStorage.getItem('aura_exams_v2') || '[]');
     }
     try {

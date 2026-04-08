@@ -29,29 +29,31 @@ export class OfflineTTSService {
     this.voices = this.synth.getVoices();
   }
 
-  private getBestVoice(lang: 'en' | 'vi'): SpeechSynthesisVoice | null {
-    const voices = this.voices.filter(v => v.lang.startsWith(lang));
-    if (voices.length === 0) return null;
+  private pickFemaleVoice(lang: 'en' | 'vi'): SpeechSynthesisVoice | null {
+    const all = this.voices;
 
-    // Priority for female-sounding voices in EN
-    if (lang === 'en') {
-      const preferred = voices.find(v => 
-        v.name.includes('Zira') || 
-        v.name.includes('Female') || 
-        v.name.includes('UK English Female') ||
-        v.name.includes('Google US English')
-      );
-      return preferred || voices[0];
-    }
-
-    // Priority for female-sounding voices in VI
     if (lang === 'vi') {
-      const preferred = voices.find(v => v.name.includes('HoaiMy') || v.name.includes('Female'));
-      return preferred || voices[0];
+      // Priority: Google vi-VN female → any vi female → any vi
+      return (
+        all.find(v => v.lang.startsWith('vi') && v.name.toLowerCase().includes('google') && v.name.toLowerCase().includes('female')) ||
+        all.find(v => v.lang.startsWith('vi') && v.name.toLowerCase().includes('google')) ||
+        all.find(v => v.lang.startsWith('vi') && (v.name.toLowerCase().includes('female') || v.name.includes('HoaiMy'))) ||
+        all.find(v => v.lang.startsWith('vi')) ||
+        null
+      );
     }
 
-    return voices[0];
+    // English: Google US English Female → Google UK Female → Zira/Female → any en
+    return (
+      all.find(v => v.lang.startsWith('en') && v.name === 'Google US English') ||
+      all.find(v => v.lang.startsWith('en') && v.name.toLowerCase().includes('google') && v.name.toLowerCase().includes('female')) ||
+      all.find(v => v.lang.startsWith('en') && v.name.toLowerCase().includes('google')) ||
+      all.find(v => v.lang.startsWith('en') && (v.name.includes('Zira') || v.name.includes('Female') || v.name.includes('UK English Female'))) ||
+      all.find(v => v.lang.startsWith('en')) ||
+      null
+    );
   }
+
 
   public stop() {
     this.synth.cancel();
@@ -75,12 +77,12 @@ export class OfflineTTSService {
 
     // Detect language (simple check: if contains Vietnamese chars)
     const isVietnamese = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(text);
-    const voice = this.getBestVoice(isVietnamese ? 'vi' : 'en');
+    const voice = this.pickFemaleVoice(isVietnamese ? 'vi' : 'en');
 
     const utterance = new SpeechSynthesisUtterance(text);
     if (voice) utterance.voice = voice;
-    utterance.rate = 1.0;
-    utterance.pitch = 1.1; // Slightly higher for "Sensei" feel
+    utterance.rate = 0.92; // Slightly slower for conversational pacing
+    utterance.pitch = 1.08; // Pleasant female tone
 
     utterance.onstart = () => {
       // Lip-sync hack: random volume every 100ms

@@ -1,5 +1,7 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { Volume2, Mic, MicOff, Headphones, Sparkles, Loader2, RotateCcw } from 'lucide-react';
+import { TTSService } from '../services/ttsService';
+
 
 export interface PronunciationFeedback {
   score: number;
@@ -26,14 +28,11 @@ const PracticeItem: React.FC<PracticeItemProps> = ({ text, ipa, onAnalyze }) => 
   const audioChunksRef = useRef<Blob[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // 🔊 Model pronunciation via Web Speech API
+  // 🔊 Nghe mẫu phát âm — dùng TTSService (giọng nữ Google Aura)
   const handleListen = useCallback(() => {
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'en-US';
-    utterance.rate = 0.85;
-    speechSynthesis.cancel();
-    speechSynthesis.speak(utterance);
+    TTSService.getInstance().speak(text);
   }, [text]);
+
 
   // 🎙️ Start recording
   const handleStartRecord = useCallback(async () => {

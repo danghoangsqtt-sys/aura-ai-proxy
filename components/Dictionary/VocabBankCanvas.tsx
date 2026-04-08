@@ -3,7 +3,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { SavedWord, PersonalVocabData, VocabFolder } from '../../types';
 import { canvasStorage } from '../../services/localDataService';
 import { extractVocabFromText } from '../../services/geminiService';
+import { TTSService } from '../../services/ttsService';
 import { Volume2, Trash2, FolderPlus, Folder, FolderOpen, Search, Inbox, BookOpen, X, Check, Edit3 } from 'lucide-react';
+
 
 const VocabBankCanvas: React.FC = () => {
   const [data, setData] = useState<PersonalVocabData>({ inbox: [], folders: [] });
@@ -154,13 +156,9 @@ const VocabBankCanvas: React.FC = () => {
     ? activeWords.filter(w => w.word.toLowerCase().includes(searchQuery.toLowerCase()) || w.meaning.toLowerCase().includes(searchQuery.toLowerCase()))
     : activeWords;
 
+  // Dùng TTSService — giọng nữ Google Aura, nhất quán toàn app
   const speak = (text: string) => {
-    if (!window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'en-US';
-    u.rate = 0.9;
-    window.speechSynthesis.speak(u);
+    TTSService.getInstance().speak(text);
   };
 
   if (loading) {

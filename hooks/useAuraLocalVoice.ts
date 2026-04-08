@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from 'react';
 import { STTService } from '../services/sttService';
 import { sendChatMessage, ChatMessage as GeminiChatMessage } from '../services/geminiService';
-import { VieneuService } from '../services/vieneuService';
+import { TTSService } from '../services/ttsService';
 import { useAuraStore } from '../store/useAuraStore';
 
 export interface ChatMessage {
@@ -149,7 +149,7 @@ export const useAuraLocalVoice = () => {
       .replace(/\n{2,}/g, '. ')           // double newlines → pause
       .trim();
 
-    VieneuService.getInstance().speak(
+    TTSService.getInstance().speak(
       cleanText,
       (vol) => setTtsVolume(vol),
       () => {
@@ -186,7 +186,7 @@ export const useAuraLocalVoice = () => {
     setIsRecording(false);
     setMicVolume(0);
     STTService.getInstance().stopListening();
-    VieneuService.getInstance().stop();
+    TTSService.getInstance().stop();
     setIsAuraSpeaking(false);
     setTtsVolume(0);
     setIsThinking(false);

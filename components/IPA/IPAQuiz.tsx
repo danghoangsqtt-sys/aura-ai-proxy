@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { IPASound } from '../../data/ipaData';
+import { TTSService } from '../../services/ttsService';
 
 interface IPAQuizProps {
   sound: IPASound;
@@ -59,23 +60,17 @@ const IPAQuiz: React.FC<IPAQuizProps> = ({ sound }) => {
     };
   }, [sound, generateQuestion]);
 
+  // Dùng TTSService (giọng nữ Google Aura) để phát âm từ IPA quiz
   const playSound = useCallback(() => {
     if (!currentQuestion) return;
-    
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel(); // Prevent overlaps
-      
-      setIsPlaying(true);
-      const utterance = new SpeechSynthesisUtterance(currentQuestion.wordToSpeak);
-      utterance.lang = 'en-US';
-      utterance.rate = 0.85; // Slightly slower for clear listening
-      
-      utterance.onend = () => setIsPlaying(false);
-      utterance.onerror = () => setIsPlaying(false);
-      
-      window.speechSynthesis.speak(utterance);
-    }
+    setIsPlaying(true);
+    TTSService.getInstance().speak(
+      currentQuestion.wordToSpeak,
+      undefined,
+      () => setIsPlaying(false)  // onEnd callback
+    );
   }, [currentQuestion]);
+
 
   // Auto-play when question changes
   useEffect(() => {

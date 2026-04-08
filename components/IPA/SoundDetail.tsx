@@ -3,8 +3,10 @@ import { IPASound } from '../../data/ipaData';
 import { ipaPracticeMap } from '../../data/ipaPracticeData';
 import { analyzePronunciation, PronunciationFeedback } from '../../services/geminiService';
 import { getVideoEmbedUrl, hasVideo } from '../../data/ipaVideoMap';
+import { TTSService } from '../../services/ttsService';
 import PracticeItem from '../PracticeItem';
 import IPAQuiz from './IPAQuiz';
+
 
 interface SoundDetailProps {
   sound: IPASound;
@@ -15,14 +17,9 @@ const SoundDetail: React.FC<SoundDetailProps> = ({ sound, onBack }) => {
   const [activeTab, setActiveTab] = useState<'theory' | 'practice' | 'pairs' | 'quiz'>('theory');
   const [practiceSubTab, setPracticeSubTab] = useState<'words' | 'sentences'>('words');
 
-  // For Text-to-Speech
+  // Dùng TTSService (giọng nữ Google Aura) để phát âm từ IPA
   const handlePlayWord = (word: string) => {
-    if ('speechSynthesis' in window) {
-      const utterance = new SpeechSynthesisUtterance(word);
-      utterance.lang = 'en-US';
-      utterance.rate = 0.8; // slightly slower for clarity
-      window.speechSynthesis.speak(utterance);
-    }
+    TTSService.getInstance().speak(word);
   };
 
   // AI Evaluation handler for PracticeItem

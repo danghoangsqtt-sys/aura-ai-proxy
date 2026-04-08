@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { VocabularyItem } from '../types';
+import { TTSService } from '../services/ttsService';
 
 interface VocabArenaProps {
   vocabList: VocabularyItem[];
@@ -74,16 +75,9 @@ const VocabArena: React.FC<VocabArenaProps> = ({ vocabList, onClose }) => {
 
   // --- TIỆN ÍCH ---
 
+  // Dùng TTSService — giọng nữ Google Aura (nhất quán toàn app)
   const speakWord = (text: string) => {
-    if (!window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const ut = new SpeechSynthesisUtterance(text);
-    ut.lang = 'en-US';
-    // Giảm tốc độ đọc từ 0.8 xuống 0.6 để người dùng nghe rõ từng âm tiết hơn
-    ut.rate = 0.6; 
-    ut.pitch = 1;
-    ut.volume = 1;
-    window.speechSynthesis.speak(ut);
+    TTSService.getInstance().speak(text);
   };
 
   const maskWord = (sentence: string, word: string) => {

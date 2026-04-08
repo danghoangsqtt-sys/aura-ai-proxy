@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { generateMacaronicStory } from '../services/geminiService';
+import { TTSService } from '../services/ttsService';
 
 import { canvasStorage } from '../services/localDataService';
 import { PersonalVocabData } from '../types';
@@ -350,7 +351,7 @@ const MacaronicStory: React.FC = () => {
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
-                            <button onClick={() => { if (window.speechSynthesis) { window.speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(selectedVocab.word); u.lang = 'en-US'; u.rate = 0.9; window.speechSynthesis.speak(u); } }}
+                            <button onClick={() => TTSService.getInstance().speak(selectedVocab.word)}
                               title="Nghe phát âm" className="w-8 h-8 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center text-white transition-all">
                               🔊
                             </button>

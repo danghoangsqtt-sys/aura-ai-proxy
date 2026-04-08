@@ -367,16 +367,6 @@ const App: React.FC = () => {
                     setIsCinematicSpeaking(false);
                 }} />
              </div>
-          ) : isLiveVoice ? (
-             <div className="h-full flex flex-col items-center justify-center bg-slate-50/30">
-                <div className="text-center animate-pulse">
-                   <div className="w-20 h-20 bg-indigo-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-2xl shadow-indigo-200">
-                      <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
-                   </div>
-                   <h2 className="text-xl font-black text-slate-800 uppercase tracking-[8px]">Aura đang lắng nghe...</h2>
-                   <p className="text-[10px] font-bold text-slate-400 mt-2 tracking-widest uppercase">Hãy nói điều gì đó với Aura</p>
-                </div>
-             </div>
           ) : (
             <>
               {activeTab === 'home' && <WelcomePage onNavigate={(tab) => { setActiveTab(tab); setCurrentMode('dashboard'); }} />}

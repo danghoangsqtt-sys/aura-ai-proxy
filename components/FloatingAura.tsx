@@ -52,10 +52,19 @@ const FloatingAura: React.FC<FloatingAuraProps> = ({ isCinematic, onExitCinemati
     setShowMenu(false);
     setIsLiveVoice(true);
     if (!connected) {
-        connect("Chào bạn! Mình là Aura, gia sư tiếng Anh của bạn. Hôm nay bạn muốn luyện tập chủ đề gì? Mình có thể giúp bạn luyện nói, học từ vựng, hoặc tra cứu ngữ pháp nhé!");
+        const greeting = "Hi there! I'm Aura, your personal English tutor. What would you like to practice today? Speaking, vocabulary, or grammar?";
+        const systemPrompt = `You are Aura, a friendly and cheerful female English tutor AI. 
+IMPORTANT RULES:
+- ALWAYS respond in ENGLISH only — never in Vietnamese, even if the user speaks Vietnamese.
+- Keep responses concise (2-4 sentences max) since they will be read aloud via Text-to-Speech.
+- Be warm, encouraging, and natural — like a real conversation partner.
+- If the user speaks Vietnamese, understand it but always reply in English.
+- Avoid markdown, bullet points, or long lists — speak in natural flowing sentences.`;
+        connect(greeting, systemPrompt);
     }
     setIsLiveChatOpen(true);
   };
+
 
   const handleDisconnect = () => {
     console.info('[FloatingAura] -> [Action]: Disconnecting...');
@@ -168,18 +177,20 @@ const FloatingAura: React.FC<FloatingAuraProps> = ({ isCinematic, onExitCinemati
         </div>
       )}
 
-      {/* 3. Transparent Bottom Bar (For Live Voice Mode — does NOT cover Aura) */}
+      {/* 3. Compact Voice Chat Widget (Positioned next to Aura, like ChatbotPanel) */}
       {(isLiveChatOpen || isLiveVoice) && (
-        <AuraLiveChat 
-            messages={messages} 
-            isAuraSpeaking={isActuallySpeaking}
-            interimText={interimText}
-            isRecording={isRecording}
-            onStartRecord={startRecording}
-            onStopRecord={stopRecording}
-            isThinking={isThinking}
-            onClose={() => { if (isLiveVoice) handleDisconnect(); setIsLiveChatOpen(false); }}
-        />
+        <div className="pointer-events-auto pb-8 -ml-16 md:-ml-24 animate-in slide-in-from-left-8 fade-in duration-500 ease-out origin-bottom-left">
+          <AuraLiveChat 
+              messages={messages} 
+              isAuraSpeaking={isActuallySpeaking}
+              interimText={interimText}
+              isRecording={isRecording}
+              onStartRecord={startRecording}
+              onStopRecord={stopRecording}
+              isThinking={isThinking}
+              onClose={() => { if (isLiveVoice) handleDisconnect(); setIsLiveChatOpen(false); }}
+          />
+        </div>
       )}
     </div>
   );

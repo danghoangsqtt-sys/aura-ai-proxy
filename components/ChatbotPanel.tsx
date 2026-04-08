@@ -3,7 +3,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { sendChatMessage, ChatMessage } from '../services/geminiService';
-import { VieneuService } from '../services/vieneuService';
 import { STTService } from '../services/sttService';
 import { useAuraStore } from '../store/useAuraStore';
 
@@ -30,7 +29,8 @@ const ChatbotPanel: React.FC<ChatbotPanelProps> = ({ onClose }) => {
   const [isSttRecording, setIsSttRecording] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   
-  const { setTtsVolume, setIsAuraSpeaking, isAuraSpeaking } = useAuraStore();
+
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -50,29 +50,7 @@ const ChatbotPanel: React.FC<ChatbotPanelProps> = ({ onClose }) => {
     setTimeout(() => setToast(null), 3000);
   };
 
-  // --- TTS Logic ---
-  const speakMessage = (text: string) => {
-    if (isAuraSpeaking) {
-      VieneuService.getInstance().stop();
-      setIsAuraSpeaking(false);
-      setTtsVolume(0);
-      return;
-    }
 
-    setIsAuraSpeaking(true);
-    const cleanText = text.replace(/[*_#`]/g, '').trim();
-    
-    VieneuService.getInstance().speak(
-      cleanText,
-      (vol) => setTtsVolume(vol),
-      () => {
-        setIsAuraSpeaking(false);
-        setTtsVolume(0);
-      }
-    );
-  };
-
-  // --- Message Actions ---
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     showToast("Đã sao chép vào bộ nhớ tạm!");
@@ -122,10 +100,6 @@ const ChatbotPanel: React.FC<ChatbotPanelProps> = ({ onClose }) => {
       };
       
       setMessages(prev => [...prev, newAssistantMsg]);
-      
-      if (responseText.length < 200) {
-        speakMessage(responseText);
-      }
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         showToast("Lỗi kết nối Aura.");
@@ -220,14 +194,11 @@ const ChatbotPanel: React.FC<ChatbotPanelProps> = ({ onClose }) => {
               <div className={`mt-1.5 flex items-center gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
                 <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">{msg.timestamp}</span>
                 
-                {msg.role === 'model' && (
+              {msg.role === 'model' && (
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={() => speakMessage(msg.content)} className={`p-1.5 rounded-md bg-white border border-slate-100 shadow-sm transition-all ${isAuraSpeaking ? 'text-indigo-600 ring-1 ring-indigo-100' : 'text-slate-400 hover:text-indigo-600'}`} title="Đọc">
-                      <svg className={`w-3 h-3 ${isAuraSpeaking ? 'animate-pulse' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>
-                    </button>
                     <button onClick={() => copyToClipboard(msg.content)} className="p-1.5 rounded-md bg-white border border-slate-100 shadow-sm text-slate-400 hover:text-indigo-600 transition-all font-bold text-[8px]" title="Copy">COPY</button>
                     {idx === messages.length - 1 && (
-                      <button onClick={regenerateLastMessage} className="p-1.5 rounded-md bg-white border border-slate-100 shadow-sm text-slate-400 hover:text-indigo-600 transition-all" title="Regen">
+                      <button onClick={regenerateLastMessage} className="p-1.5 rounded-md bg-white border border-slate-100 shadow-sm text-slate-400 hover:text-indigo-600 transition-all" title="Gửi lại">
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m0 0H15" /></svg>
                       </button>
                     )}
