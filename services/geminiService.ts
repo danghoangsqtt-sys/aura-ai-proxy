@@ -18,68 +18,50 @@ interface ProxyRequestOptions {
 }
 
 /**
- * Core: Gọi thẳng Gemini REST API bằng token ya29.* của người dùng (BYOA Mode)
- * Bỏ qua CLIProxyAPI — đây là kiến trúc đúng cho BYOA.
+ * Core: Gọi CLIProxyAPI (port 8080) theo chuẩn OpenAI API.
+ * Bỏ qua Appwrite, dùng alias trả về làm Bearer Token.
  */
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
-const DEFAULT_GEMINI_MODEL = 'gemini-2.0-flash';
-
-/** Chuyển đổi messages (OpenAI format) → Gemini content format */
-const toGeminiPayload = (messages: ProxyMessage[], opts: ProxyRequestOptions) => {
-  const systemMsg = messages.find(m => m.role === 'system');
-  const chatMsgs  = messages.filter(m => m.role !== 'system');
-
-  const contents = chatMsgs.map(m => ({
-    role: m.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }]
-  }));
-
-  const payload: any = {
-    contents,
-    generationConfig: {
-      temperature: opts.temperature ?? 0.7,
-      ...(opts.max_tokens ? { maxOutputTokens: opts.max_tokens } : {}),
-      ...(opts.response_format?.type === 'json_object' ? { responseMimeType: 'application/json' } : {}),
-    }
-  };
-  if (systemMsg) payload.systemInstruction = { parts: [{ text: systemMsg.content as string }] };
-  return payload;
-};
-
 const proxyFetch = async (
   messages: ProxyMessage[],
   opts: ProxyRequestOptions = {}
 ): Promise<string> => {
-  const model = opts.model || DEFAULT_GEMINI_MODEL;
-  const payload = toGeminiPayload(messages, opts);
+  const proxyUrl = import.meta.env.VITE_PROXY_URL?.replace(/\/$/, '') || 'http://127.0.0.1:8317';
+  const model = opts.model || 'gemini-2.5-flash';
+
+  const body = {
+    model,
+    messages,
+    temperature: opts.temperature ?? 0.7,
+    ...(opts.response_format ? { response_format: opts.response_format } : {}),
+    ...(opts.max_tokens ? { max_tokens: opts.max_tokens } : {}),
+  };
 
   let res: Response;
   try {
-    const token = await authService.getAIToken();
-    res = await fetch(`${GEMINI_API_BASE}/${model}:generateContent`, {
+    const alias = await authService.getAIToken();
+    res = await fetch(`${proxyUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
+        'Authorization': `Bearer ${alias}`
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
   } catch (networkError: any) {
-    throw new Error(`Không thể kết nối Gemini API. Kiểm tra lại kết nối mạng.`);
+    throw new Error(`Không thể kết nối proxy server (${proxyUrl}). Kiểm tra lại proxy.`);
   }
 
-  if (res.status === 401) throw new Error('UNAUTHORIZED: Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để tiếp tục.');
-  if (res.status === 403) throw new Error('Tài khoản Google chưa có quyền truy cập Gemini API. Kiểm tra Google Cloud Console.');
-  if (res.status === 429) throw new Error('Hệ thống AI đang quá tải (vượt quota). Vui lòng thử lại sau 1 phút.');
+  if (res.status === 401) throw new Error('UNAUTHORIZED: Alias không hợp lệ hoặc hết hạn.');
+  if (res.status === 429) throw new Error('Hệ thống AI đang quá tải. Vui lòng thử lại sau 1 phút.');
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    throw new Error(`Lỗi từ Gemini API (${res.status}): ${errText || 'Không xác định'}`);
+    throw new Error(`Lỗi từ Proxy Server (${res.status}): ${errText || 'Không xác định'}`);
   }
 
   const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('Phản hồi từ AI không hợp lệ hoặc rỗng.');
-  return text as string;
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content) throw new Error('Phản hồi từ AI không hợp lệ hoặc rỗng.');
+  return content as string;
 };
 
 
