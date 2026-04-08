@@ -1,6 +1,7 @@
 /**
  * Service for CLIProxyAPI Authentication (Bring Your Own Account via Proxy)
  */
+const PROXY_URL = import.meta.env.VITE_PROXY_URL || 'https://aura-ai-proxy.onrender.com';
 export const authService = {
     /**
      * Start CLIProxy OAuth Flow for Gemini (Mock Fallback)
@@ -109,6 +110,58 @@ export const authService = {
         }
 
         return alias;
+    },
+
+    /**
+     * OOB Step 1: Open the Proxy OAuth popup.
+     * Does NOT set any localStorage — that happens only after code exchange.
+     */
+    initiateProxyLogin() {
+        const url = `${PROXY_URL}/google/login?management_password=admin123&is_webui=1`;
+        window.open(url, '_blank', 'noopener,noreferrer');
+    },
+
+    /**
+     * OOB Step 2: Parse the broken localhost callback URL the user pasted,
+     * exchange the code with the proxy, then persist the session.
+     */
+    async submitCallbackUrl(pastedUrl: string) {
+        let parsedUrl: URL;
+        try {
+            parsedUrl = new URL(pastedUrl);
+        } catch {
+            throw new Error('URL không hợp lệ. Vui lòng kiểm tra và thử lại.');
+        }
+
+        const state = parsedUrl.searchParams.get('state');
+        const code = parsedUrl.searchParams.get('code');
+
+        if (!state || !code) {
+            throw new Error('URL thiếu tham số "state" hoặc "code". Hãy đảm bảo bạn đã copy đúng URL từ trang lỗi.');
+        }
+
+        const callbackEndpoint = `${PROXY_URL}/google/callback?state=${encodeURIComponent(state)}&code=${encodeURIComponent(code)}`;
+        const res = await fetch(callbackEndpoint);
+
+        if (!res.ok) {
+            const body = await res.text().catch(() => '');
+            throw new Error(`Xác thực thất bại (${res.status}). ${body || 'Vui lòng thử đăng nhập lại.'}`);
+        }
+
+        // Session established — persist alias and mark logged in
+        localStorage.setItem('aura_proxy_alias', 'default');
+        localStorage.setItem('aura_chat_api_key', 'aura-internal-bypass');
+        localStorage.setItem('aura_logged_in', '1');
+
+        const mockUser = {
+            email: 'proxy_connected@aura',
+            name: 'Người dùng Aura',
+            picture: '',
+            $id: 'proxy'
+        };
+        localStorage.setItem('aura_user_profile', JSON.stringify(mockUser));
+
+        return mockUser;
     }
 };
 
