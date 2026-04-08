@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { authService } from '../../services/authService';
+import { useGoogleLogin } from '@react-oauth/google';
 
 interface AuthModalProps {
   onSuccess: (user: any) => void;
@@ -9,14 +10,39 @@ const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const hasGoogleProvider = !!import.meta.env.VITE_GOOGLE_CLIENT_ID;
+
+  const performRealGoogleLogin = useGoogleLogin({
+    onSuccess: async (tokenResponse) => {
+      try {
+        setIsLoading(true);
+        const user = await authService.loginWithGoogleAccessToken(tokenResponse.access_token);
+        onSuccess(user);
+      } catch (err: any) {
+        setError(err.message || 'Đã có lỗi xảy ra khi lấy hồ sơ Google.');
+        setIsLoading(false);
+      }
+    },
+    onError: () => {
+      setError('Đăng nhập Google bị huỷ hoặc xảy ra lỗi mạng.');
+      setIsLoading(false);
+    }
+  });
+
   const handleGoogleLogin = async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const user = await authService.loginWithProxy();
-      onSuccess(user);
+      if (!hasGoogleProvider) {
+        // Fallback to anonymous internal mapping
+        const user = await authService.mockProxyLogin();
+        onSuccess(user);
+      } else {
+        // Trigger Google standard popup
+        performRealGoogleLogin();
+      }
     } catch (err: any) {
-      setError(err.message || 'Đã có lỗi xảy ra khi gọi Proxy Login.');
+      setError(err.message || 'Đã có lỗi nội bộ xảy ra.');
       setIsLoading(false);
     }
   };
