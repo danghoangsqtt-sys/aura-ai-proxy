@@ -13,8 +13,8 @@ if (!endpoint || !projectId) {
 }
 
 client
-    .setEndpoint(endpoint || '')
-    .setProject(projectId || '');
+    .setEndpoint(endpoint || 'https://localhost/v1')
+    .setProject(projectId || 'dummy_project');
 
 export const account = new Account(client);
 export const databases = new Databases(client);
